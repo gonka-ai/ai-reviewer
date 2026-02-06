@@ -76,9 +76,9 @@ func main() {
 	// 8. Report
 	runConfig.OutputHandler.Println("--- Generating report...")
 	runResults.Finish()
-	runResults.Report = generateReport(s.PRNumber, s.CommitHash, runConfig.PRInfo.BaseRefOid, runConfig.PRInfo.HeadRefOid, runResults, s.FilePatterns)
-	runConfig.OutputHandler.Printf("%s", runResults.Report)
-	runConfig.OutputHandler.SaveRunFile("report.md", runResults.Report)
+	runResults.Report = generateReport(s.PRNumber, s.CommitHash, runConfig.PRInfo.BaseRefOid, runConfig.PRInfo.HeadRefOid, runResults, s.FilePatterns, runConfig.OutputHandler)
+	runConfig.OutputHandler.Printf("%s", runConfig.OutputHandler.Highlight(runResults.Report))
+	runConfig.OutputHandler.SaveRunFile("report.md", runConfig.OutputHandler.StripMarkers(runResults.Report))
 }
 
 func runPersonas(ctx context.Context, personas []PersonaRun, rc *RunConfig, rr *RunResults, sem chan struct{}, stageLabel string) {
@@ -94,7 +94,7 @@ func runPersonas(ctx context.Context, personas []PersonaRun, rc *RunConfig, rr *
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			if err := run.Execute(ctx, rc, rr); err != nil {
-				rc.OutputHandler.Printf("Error executing %s %s: %v, skipping\n", stageLabel, run.Persona.ID, err)
+				rc.OutputHandler.Printf("Error executing %s %s: %v, skipping\n", stageLabel, run.Persona.ColoredID, err)
 			}
 		}(run)
 	}
@@ -113,7 +113,7 @@ func checkDependencies() error {
 	return nil
 }
 
-func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResults, filePatterns []string) string {
+func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResults, filePatterns []string, oh *OutputHandler) string {
 	var out strings.Builder
 	out.WriteString("# AI Review Report\n\n")
 	if filePatterns != nil {
@@ -152,7 +152,7 @@ func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResult
 		cost := (float64(s.TokensIn) * s.InputPrice / 1000000.0) +
 			(float64(s.TokensOut) * s.OutputPrice / 1000000.0)
 
-		out.WriteString(fmt.Sprintf("- %s (%s): In: %d, Out: %d, Time: %dms, Cost: $%.6f\n", s.PersonaID, s.Model, s.TokensIn, s.TokensOut, s.TimeMS, cost))
+		out.WriteString(fmt.Sprintf("- %s (%s): In: %d, Out: %d, Time: %dms, Cost: $%.6f\n", oh.MarkPersona(s.PersonaID), s.Model, s.TokensIn, s.TokensOut, s.TimeMS, cost))
 		totalIn += s.TokensIn
 		totalOut += s.TokensOut
 		totalCost += cost

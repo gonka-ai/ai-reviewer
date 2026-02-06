@@ -13,7 +13,8 @@ import (
 )
 
 type Persona struct {
-	ID                string   `yaml:"id"`
+	ID                string `yaml:"id"`
+	ColoredID         string
 	ModelCategory     string   `yaml:"model_category"`
 	MaxTokens         int      `yaml:"max_tokens"`
 	PathFilters       []string `yaml:"path_filters"`
@@ -69,6 +70,7 @@ func LoadPersonas(searchPaths []string, repo string, oh *OutputHandler) ([]Perso
 				// Fallback to filename without extension as ID
 				p.ID = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
 			}
+			p.ColoredID = "\033[32m" + p.ID + "\033[0m"
 			if p.Role == "" {
 				p.Role = "reviewer"
 			}
@@ -142,13 +144,13 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 	if pr.Persona.Role == "explainer" {
 		roleStr = fmt.Sprintf("Explainer (%s)", strings.Title(pr.Persona.Stage))
 	}
-	rc.OutputHandler.Printf("    -> %s: %s\n", roleStr, pr.Persona.ID)
+	rc.OutputHandler.Printf("    -> %s: %s\n", roleStr, pr.Persona.ColoredID)
 
 	prompt, result, elapsed, err := pr.Persona.Run(ctx, rc, rr, pr.Context)
 	if err != nil {
 		return fmt.Errorf("error executing %s: %w", pr.Persona.ID, err)
 	}
-	rc.OutputHandler.Printf("    <- Finished %s in %s\n", pr.Persona.ID, elapsed.Round(time.Millisecond))
+	rc.OutputHandler.Printf("    <- Finished %s in %s\n", pr.Persona.ColoredID, elapsed.Round(time.Millisecond))
 
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "prompt.md"), prompt)
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "raw.md"), result.Text)
@@ -160,7 +162,7 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		if pr.Persona.Stage == "pre" {
 			analyses, err := ParsePreRunExplainerOutput(result.Text)
 			if err != nil {
-				rc.OutputHandler.Printf("Warning: error parsing pre-run explainer output for %s: %v\n", pr.Persona.ID, err)
+				rc.OutputHandler.Printf("Warning: error parsing pre-run explainer output for %s: %v\n", pr.Persona.ColoredID, err)
 			} else {
 				parsedData, _ := json.MarshalIndent(analyses, "", "  ")
 				rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "parsed.json"), string(parsedData))
@@ -169,17 +171,17 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 				}
 			}
 		} else {
-			rr.AddPostRunOutput(fmt.Sprintf("### %s\n\n%s", pr.Persona.ID, result.Text))
+			rr.AddPostRunOutput(fmt.Sprintf("### %s\n\n%s", rc.OutputHandler.MarkPersona(pr.Persona.ID), result.Text))
 		}
 	case "reviewer":
-		rc.OutputHandler.Printf("    -> Normalizing findings for %s...\n", pr.Persona.ID)
+		rc.OutputHandler.Printf("    -> Normalizing findings for %s...\n", pr.Persona.ColoredID)
 		normStart := time.Now()
 		var normResult ModelResult
 		var err error
 		findings, normResult, err = NormalizePersonaOutput(ctx, rc.FastestClient, pr.Persona.ID, result.Text)
 		normElapsed := time.Since(normStart)
 		if err != nil {
-			rc.OutputHandler.Printf("Warning: error normalizing findings for %s: %v. Treating as zero findings.\n", pr.Persona.ID, err)
+			rc.OutputHandler.Printf("Warning: error normalizing findings for %s: %v. Treating as zero findings.\n", pr.Persona.ColoredID, err)
 		} else {
 			rr.AddFindings(findings)
 			findingsData, _ := json.MarshalIndent(findings, "", "  ")

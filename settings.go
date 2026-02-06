@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -108,6 +109,20 @@ func (h *OutputHandler) LogRun(entry RunLogEntry) {
 
 	data, _ := json.Marshal(entry)
 	f.Write(append(data, '\n'))
+}
+
+func (h *OutputHandler) MarkPersona(id string) string {
+	return "@persona{" + id + "}"
+}
+
+func (h *OutputHandler) Highlight(s string) string {
+	re := regexp.MustCompile(`@persona\{([^}]+)\}`)
+	return re.ReplaceAllString(s, "\033[32m$1\033[0m")
+}
+
+func (h *OutputHandler) StripMarkers(s string) string {
+	re := regexp.MustCompile(`@persona\{([^}]+)\}`)
+	return re.ReplaceAllString(s, "$1")
 }
 
 func (h *OutputHandler) Printf(format string, a ...interface{}) {
@@ -343,7 +358,7 @@ func (rc *RunConfig) filterPersonas() {
 			var err error
 			personaContext, err = GetPRContext(rc.PRInfo, includes, p.ExcludeFilters, p.RegexFilters)
 			if err != nil {
-				rc.OutputHandler.Printf("    Warning: error filtering context for persona %s: %v\n", p.ID, err)
+				rc.OutputHandler.Printf("    Warning: error filtering context for persona %s: %v\n", p.ColoredID, err)
 				continue
 			}
 		} else {
@@ -378,25 +393,25 @@ func (rc *RunConfig) filterPersonas() {
 
 	rc.OutputHandler.Println("    To be run:")
 	for _, r := range rc.PreRunToRun {
-		rc.OutputHandler.Printf("      - %s (explainer, pre)\n", r.Persona.ID)
+		rc.OutputHandler.Printf("      - %s (explainer, pre)\n", r.Persona.ColoredID)
 	}
 	for _, r := range rc.ReviewersToRun {
-		rc.OutputHandler.Printf("      - %s (reviewer)\n", r.Persona.ID)
+		rc.OutputHandler.Printf("      - %s (reviewer)\n", r.Persona.ColoredID)
 	}
 	for _, r := range rc.PostRunToRun {
-		rc.OutputHandler.Printf("      - %s (explainer, post)\n", r.Persona.ID)
+		rc.OutputHandler.Printf("      - %s (explainer, post)\n", r.Persona.ColoredID)
 	}
 
 	if len(rc.PreRunToSkip) > 0 || len(rc.ReviewersToSkip) > 0 || len(rc.PostRunToSkip) > 0 {
 		rc.OutputHandler.Println("    To be skipped (no matching files):")
 		for _, r := range rc.PreRunToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ID)
+			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
 		}
 		for _, r := range rc.ReviewersToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ID)
+			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
 		}
 		for _, r := range rc.PostRunToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ID)
+			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
 		}
 	}
 }

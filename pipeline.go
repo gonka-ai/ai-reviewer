@@ -124,18 +124,18 @@ Example structure:
 <3–5 sentences, high level>
 
 ## ❗ Must Fix
-- <issue> (sources: persona1, persona2)
+- <issue> (sources: @persona{persona1}, @persona{persona2})
 
 ## ⚠️ Review Carefully
-- <issue> (sources: persona1)
+- <issue> (sources: @persona{persona1})
 
 ## 💭 Consider
-- <issue> (sources: persona3, ./filename.go; lines 10–15)
+- <issue> (sources: @persona{persona3}, ./filename.go; lines 10–15)
 
 ## Persona Summaries
-- Persona1: ❌ Significant issues
-- Persona2: ⚠️ Minor issues
-- Persona3: ✅ Looks reasonable
+- @persona{Persona1}: ❌ Significant issues
+- @persona{Persona2}: ⚠️ Minor issues
+- @persona{Persona3}: ✅ Looks reasonable
 
 Instructions for aggregation:
 	•	Cut all chatter
@@ -144,6 +144,7 @@ Instructions for aggregation:
 	•	Upgrade severity when multiple personas agree
 	•	Downgrade severity for low-confidence findings
 	•	Explicitly call out disagreements
+	•	Use @persona{ID} whenever you refer to a persona's ID.
 `
 
 func extractJSON(text string) string {
