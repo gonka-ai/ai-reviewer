@@ -34,6 +34,14 @@ model_mapping:
     input_price_per_million: 2.00
     output_price_per_million: 12.00
 
+primer_types:
+  overview:
+    description: "A broad overview of a major component of Gonka"
+  implementation:
+    description: "Details about the implementation of an important subsystem in Gonka"
+  caution:
+    description: "A particularly important fact about a part of the Gonka network"
+
 global_instructions: |
   This code is all using Go version 1.25.
   The code under ./inference-chain is all Cosmos SDK code for a Layer-1 blockchain.
