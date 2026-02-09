@@ -34,13 +34,26 @@ model_mapping:
     max_tokens: 4096
     input_price_per_million: 0.30
     output_price_per_million: 2.50
+
+primer_types:
+  blueprint:
+    description: "Architectural blueprints that must be followed for new or modified components."
+  constraint:
+    description: "Strict constraints or rules that apply to the codebase."
 ```
 
 `max_tokens` here sets the default limit for the category.
 
+### Discovery and Organization
+
+The tool scans for personas and primers in multiple locations:
+
+- **Dedicated Directories**: Any `.md` file within `.ai-review/personas/`, `.ai-review/primers/`, or their repository-specific counterparts (e.g., `.ai-review/<owner>/<repo>/personas/`) is automatically loaded. All subdirectories are searched recursively, allowing you to organize them by purpose or to mirror the structure of the project itself. Files in these directories do **not** require an `ai_review` field in their frontmatter.
+- **Repository-wide Scanning**: The tool also scans all `.md` files in the repository branch being evaluated. A file is included as a persona or primer if it contains an explicit `ai_review: persona` or `ai_review: primer` field in its YAML frontmatter. This allows you to keep personas and primers alongside the code they relate to.
+
 ### Personas
 
-Create persona files in `.ai-review/<repo_owner>/<repo_name>/personas/*.md`. Personas support several fields in their YAML frontmatter:
+Create persona files in the dedicated personas directories or anywhere in your repository (with the `ai_review: persona` field). Personas support several fields in their YAML frontmatter:
 
 ```markdown
 ---
@@ -68,6 +81,25 @@ You are a security expert. Review the following PR for security vulnerabilities.
 - **Explainer (Pre)**: Runs before reviewers. Must output JSON (file-to-analysis mapping). Its analysis is injected into the context of all subsequent personas for that file.
 - **Explainer (Post)**: Runs after reviewers. Its full output is included in the final report under an "Explanations" section. Useful for providing human-readable guides or high-level summaries.
 
+### Primers
+
+Primers provide extra context, constraints, or blueprints to personas based on the specific files they are analyzing. They are included in the persona prompt only if the persona is analyzing files that match the primer's filters.
+
+Create primer files in the dedicated primers directories or anywhere in your repository (with the `ai_review: primer` field). They support the same filtering fields as personas (`path_filters`, `exclude_filters`, `regex_filters`):
+
+```markdown
+---
+id: inference-chain-blueprint
+type: blueprint
+path_filters:
+  - "inference-chain/**/*.go"
+---
+When modifying the inference chain, ensure that you follow the established patterns:
+1. ...
+```
+
+The `type` field matches the types defined in `config.yaml` to provide additional intent to the AI.
+
 #### Token Limit Precedence
 
 The maximum tokens for a response is determined by (highest priority first):
@@ -86,14 +118,20 @@ A `.gitignore` file is provided in the project root to ensure that the `.repos` 
 ```bash
 go build -o ai-review
 # Review a PR
-./ai-review pr <repo_owner>/<repo_name> <pr_number> [--max-tokens <int>]
+./ai-review pr <repo_owner>/<repo_name> <pr_number> [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 
 # Review a specific commit (compared to its parent by default)
-./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [--max-tokens <int>]
+./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 
 # Review specific files on a branch
-./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [--max-tokens <int>]
+./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 ```
+
+### Global CLI Options
+
+- `--max-tokens <n>`: Override the maximum tokens for AI responses.
+- `--concurrency <n>`: Set the maximum number of personas to run concurrently (default: 3).
+- `--dry-run`: Scan and report what personas and primers will be applied, but do not execute any AI calls. Useful for testing configuration and filtering logic without incurring costs.
 
 Examples:
 ```bash
@@ -108,6 +146,9 @@ Examples:
 
 # Review all .go files in config directory on master branch
 ./ai-review file google/go-github master "config/*.go"
+
+# Dry run to see what would be executed for PR #1234
+./ai-review pr google/go-github 1234 --dry-run
 ```
 
 ## How it works
@@ -116,7 +157,7 @@ The tool executes a multi-stage pipeline:
 
 1. **Fetch Context**: Uses `gh` CLI and `git` to fetch PR details and compute the unified diff.
 2. **Pre-run Explainers**: Executes personas with `role: explainer` and `stage: pre`. They provide initial research that is injected into later prompts.
-3. **Reviewers**: Executes standard personas. Each reviewer's raw output is immediately processed by a **Normalization** step (using a cheap model) to extract structured findings (file, line, summary, severity).
+3. **Reviewers**: Executes standard personas. If any **Primers** match the files being analyzed by a persona, they are injected into its prompt as extra context. Each reviewer's raw output is immediately processed by a **Normalization** step (using a cheap model) to extract structured findings (file, line, summary, severity).
 4. **Post-run Explainers**: Executes personas with `role: explainer` and `stage: post`. They provide high-level context or human instructions.
 5. **Aggregation**: All structured findings from all reviewers are sent to an **Aggregator** LLM (using the `balanced` model). It deduplicates issues, clusters related findings, and produces a concise Markdown summary.
 6. **Reporting**: The final report is printed to stdout and saved to the run directory.

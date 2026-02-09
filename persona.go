@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/adrg/frontmatter"
 )
 
 type Persona struct {
 	ID                string `yaml:"id"`
+	AIReview          string `yaml:"ai_review"`
 	ColoredID         string
 	ModelCategory     string   `yaml:"model_category"`
 	MaxTokens         int      `yaml:"max_tokens"`
@@ -33,72 +31,40 @@ type PersonaRun struct {
 	Context *PRContext
 }
 
-func LoadPersonas(searchPaths []string, repo string, oh *OutputHandler) ([]Persona, error) {
-	personaMap := make(map[string]Persona)
-	foundAny := false
-
-	for _, base := range searchPaths {
-		// Try repo-specific personas
-		personaDir := filepath.Join(base, ".ai-review", repo, "personas")
-		files, _ := filepath.Glob(filepath.Join(personaDir, "*.md"))
-
-		// Also try global personas
-		globalPersonaDir := filepath.Join(base, ".ai-review/personas")
-		globalFiles, _ := filepath.Glob(filepath.Join(globalPersonaDir, "*.md"))
-
-		allFiles := append(files, globalFiles...)
-		if len(allFiles) > 0 {
-			foundAny = true
-		}
-
-		for _, file := range allFiles {
-			f, err := os.Open(file)
-			if err != nil {
-				oh.Printf("Warning: could not open persona file %s: %v\n", file, err)
-				continue
-			}
-
-			var p Persona
-			rest, err := frontmatter.Parse(f, &p)
-			f.Close()
-			if err != nil {
-				oh.Printf("Warning: error parsing frontmatter in %s: %v\n", file, err)
-				continue
-			}
-			p.Instructions = string(rest)
-			if p.ID == "" {
-				// Fallback to filename without extension as ID
-				p.ID = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-			}
-			p.ColoredID = "\033[32m" + p.ID + "\033[0m"
-			if p.Role == "" {
-				p.Role = "reviewer"
-			}
-			personaMap[p.ID] = p
-		}
+func LoadPersonas(searchPaths []string, repo string, headSHA string, oh *OutputHandler) ([]Persona, error) {
+	scanner := NewScanner(searchPaths, repo, headSHA, oh)
+	results, err := scanner.Load("persona", func() interface{} { return &Persona{} })
+	if err != nil {
+		return nil, err
 	}
 
-	if !foundAny {
+	if len(results) == 0 {
 		return nil, fmt.Errorf("no personas found in any of the search paths")
 	}
 
 	var personas []Persona
-	for _, p := range personaMap {
-		personas = append(personas, p)
+	for _, res := range results {
+		p := res.Raw.(*Persona)
+		p.Instructions = res.Instructions
+		if p.Role == "" {
+			p.Role = "reviewer"
+		}
+		p.ColoredID = "\033[32m" + p.ID + "\033[0m"
+		personas = append(personas, *p)
 	}
 
 	return personas, nil
 }
 
-func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, personaContext *PRContext) (string, ModelResult, time.Duration, error) {
+func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, personaContext *PRContext) (string, ModelResult, time.Duration, []PrimerMatch, error) {
 	modelCfg, ok := rc.Config.ModelMapping[p.ModelCategory]
 	if !ok {
-		return "", ModelResult{}, 0, fmt.Errorf("no model mapping for category %s", p.ModelCategory)
+		return "", ModelResult{}, 0, nil, fmt.Errorf("no model mapping for category %s", p.ModelCategory)
 	}
 
 	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model)
 	if err != nil {
-		return "", ModelResult{}, 0, fmt.Errorf("error creating client: %w", err)
+		return "", ModelResult{}, 0, nil, fmt.Errorf("error creating client: %w", err)
 	}
 
 	maxTokens := modelCfg.MaxTokens
@@ -119,7 +85,9 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		summary = rr.Summary
 	}
 
-	prompt := buildPrompt(p, personaContext, rc.Config.GlobalInstructions, preRunAnalyses, summary)
+	matchedPrimers := rc.FindMatches(personaContext)
+
+	prompt := buildPrompt(p, personaContext, rc.Config.GlobalInstructions, preRunAnalyses, summary, matchedPrimers, rc.Config.PrimerTypes)
 
 	personaCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -132,11 +100,11 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		result, err = client.Generate(personaCtx, prompt, maxTokens)
 	}
 	if err != nil {
-		return prompt, ModelResult{}, 0, err
+		return prompt, ModelResult{}, 0, matchedPrimers, err
 	}
 	elapsed := time.Since(start)
 
-	return prompt, result, elapsed, nil
+	return prompt, result, elapsed, matchedPrimers, nil
 }
 
 func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults) error {
@@ -145,11 +113,19 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		roleStr = fmt.Sprintf("Explainer (%s)", strings.Title(pr.Persona.Stage))
 	}
 	rc.OutputHandler.Printf("    -> %s: %s\n", roleStr, pr.Persona.ColoredID)
-
-	prompt, result, elapsed, err := pr.Persona.Run(ctx, rc, rr, pr.Context)
+	prompt, result, elapsed, matchedPrimers, err := pr.Persona.Run(ctx, rc, rr, pr.Context)
 	if err != nil {
 		return fmt.Errorf("error executing %s: %w", pr.Persona.ID, err)
 	}
+
+	var primerIDs []string
+	for _, pm := range matchedPrimers {
+		primerIDs = append(primerIDs, pm.Primer.ID)
+	}
+	if len(primerIDs) > 0 {
+		rc.OutputHandler.Printf("    -> Included primers: %s\n", strings.Join(primerIDs, ", "))
+	}
+
 	rc.OutputHandler.Printf("    <- Finished %s in %s\n", pr.Persona.ColoredID, elapsed.Round(time.Millisecond))
 
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "prompt.md"), prompt)
@@ -217,6 +193,7 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		TimeMS:      elapsed.Milliseconds(),
 		RawOutput:   result.Text,
 		Findings:    findings,
+		Primers:     primerIDs,
 		InputPrice:  rc.Config.ModelMapping[pr.Persona.ModelCategory].InputPricePerMillion,
 		OutputPrice: rc.Config.ModelMapping[pr.Persona.ModelCategory].OutputPricePerMillion,
 	}

@@ -29,6 +29,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if s.DryRun {
+		return
+	}
+
 	// 7. Execute Personas
 	runResults := NewRunResults()
 

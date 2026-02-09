@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 type PRInfo struct {
@@ -23,10 +24,71 @@ type PRInfo struct {
 }
 
 type PRContext struct {
-	Title        string
-	Description  string
-	ChangedFiles []string
-	Diff         string
+	Title       string
+	Description string
+	Files       []FileContext
+}
+
+type FileContext struct {
+	Filename   string
+	Diff       string   // Annotated diff for this file
+	AddedLines []string // Only the content of the added lines
+}
+
+func (f FileContext) Matches(includes, excludes []string, regexes []*regexp.Regexp) bool {
+	if !MatchesFilters(f.Filename, includes, excludes) {
+		return false
+	}
+	if len(regexes) == 0 {
+		return true
+	}
+	for _, line := range f.AddedLines {
+		for _, re := range regexes {
+			if re.MatchString(line) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (ctx *PRContext) ChangedFiles() []string {
+	var files []string
+	for _, f := range ctx.Files {
+		files = append(files, f.Filename)
+	}
+	return files
+}
+
+func (ctx *PRContext) FullDiff() string {
+	var sb strings.Builder
+	for _, f := range ctx.Files {
+		sb.WriteString(f.Diff)
+	}
+	return sb.String()
+}
+
+func ParseAnnotatedFileDiff(fd string) FileContext {
+	lines := strings.Split(fd, "\n")
+	var filename string
+	var addedLines []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+++ b/") {
+			filename = strings.TrimPrefix(line, "+++ b/")
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		diffLine := parts[1]
+
+		if strings.HasPrefix(diffLine, "+") && !strings.HasPrefix(diffLine, "+++ ") {
+			addedLines = append(addedLines, strings.TrimPrefix(diffLine, "+"))
+		}
+	}
+	return FileContext{Filename: filename, Diff: fd, AddedLines: addedLines}
 }
 
 func GetPRInfo(repo, prNumber string) (*PRInfo, error) {
@@ -134,6 +196,15 @@ func GetFileInfo(repo, branch string, filePatterns []string) (*PRInfo, error) {
 }
 
 func GetPRContext(prInfo *PRInfo, includeFilters, excludeFilters, regexFilters []string) (*PRContext, error) {
+	var compiledRegexes []*regexp.Regexp
+	for _, r := range regexFilters {
+		re, err := regexp.Compile(r)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex %s: %w", r, err)
+		}
+		compiledRegexes = append(compiledRegexes, re)
+	}
+
 	if prInfo.BaseRefOid == prInfo.HeadRefOid && !prInfo.IsCommit && prInfo.BaseRefOid != "" {
 		// This is "file" mode, we want to see the whole content of the files as if it were a new file
 		files, err := GetFilesForPatterns(prInfo.HeadRefOid, includeFilters, excludeFilters)
@@ -141,18 +212,7 @@ func GetPRContext(prInfo *PRInfo, includeFilters, excludeFilters, regexFilters [
 			return nil, err
 		}
 
-		var finalFiles []string
-		var diffBuilder strings.Builder
-
-		var compiledRegexes []*regexp.Regexp
-		for _, r := range regexFilters {
-			re, err := regexp.Compile(r)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regex %s: %w", r, err)
-			}
-			compiledRegexes = append(compiledRegexes, re)
-		}
-
+		var finalFiles []FileContext
 		for _, file := range files {
 			// Get content of the file at HeadRefOid
 			cmd := exec.Command("git", "show", fmt.Sprintf("%s:%s", prInfo.HeadRefOid, file))
@@ -162,36 +222,31 @@ func GetPRContext(prInfo *PRInfo, includeFilters, excludeFilters, regexFilters [
 				continue
 			}
 
-			contentStr := string(content)
-			matches := len(regexFilters) == 0
-			if !matches {
-				for _, re := range compiledRegexes {
-					if re.MatchString(contentStr) {
-						matches = true
-						break
-					}
-				}
-			}
-
-			if !matches {
-				continue
-			}
-
-			finalFiles = append(finalFiles, file)
+			var diffBuilder strings.Builder
 			diffBuilder.WriteString(fmt.Sprintf("+++ b/%s\n", file))
+			contentStr := string(content)
 			lines := strings.Split(contentStr, "\n")
 			// Fake a diff chunk
 			diffBuilder.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
 			for _, line := range lines {
 				diffBuilder.WriteString("+" + line + "\n")
 			}
+
+			fileCtx := FileContext{
+				Filename:   file,
+				Diff:       AnnotateDiff(diffBuilder.String()),
+				AddedLines: lines,
+			}
+
+			if fileCtx.Matches(nil, nil, compiledRegexes) {
+				finalFiles = append(finalFiles, fileCtx)
+			}
 		}
 
 		return &PRContext{
-			Title:        prInfo.Title,
-			Description:  prInfo.Body,
-			ChangedFiles: finalFiles,
-			Diff:         AnnotateDiff(diffBuilder.String()),
+			Title:       prInfo.Title,
+			Description: prInfo.Body,
+			Files:       finalFiles,
 		}, nil
 	}
 
@@ -200,87 +255,72 @@ func GetPRContext(prInfo *PRInfo, includeFilters, excludeFilters, regexFilters [
 		return nil, err
 	}
 
-	files, err := GetChangedFiles(prInfo.BaseRefOid, prInfo.HeadRefOid, includeFilters, excludeFilters)
-	if err != nil {
-		return nil, err
-	}
+	var finalFiles []FileContext
 
-	if len(regexFilters) > 0 {
-		var compiledRegexes []*regexp.Regexp
-		for _, r := range regexFilters {
-			re, err := regexp.Compile(r)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regex %s: %w", r, err)
-			}
-			compiledRegexes = append(compiledRegexes, re)
+	// Split diff into files
+	// Git diff output starts with "diff --git" for each file
+	fileDiffs := strings.Split(diff, "diff --git ")
+	for i, fd := range fileDiffs {
+		if i == 0 && !strings.HasPrefix(fd, "diff --git ") && fd != "" {
+			// Header before first file diff if any
+			continue
+		}
+		if fd == "" {
+			continue
 		}
 
-		var filteredFiles []string
-		var filteredDiffBuilder strings.Builder
-
-		// Split diff into files
-		// Git diff output starts with "diff --git" for each file
-		fileDiffs := strings.Split(diff, "diff --git ")
-		for i, fd := range fileDiffs {
-			if i == 0 && !strings.HasPrefix(fd, "diff --git ") && fd != "" {
-				// Header before first file diff if any
-				continue
-			}
-			if fd == "" {
-				continue
-			}
-
-			fullFd := "diff --git " + fd
-			// Extract filename
-			// +++ b/filename
-			lines := strings.Split(fullFd, "\n")
-			var filename string
-			for _, line := range lines {
-				if strings.HasPrefix(line, "+++ b/") {
-					filename = strings.TrimPrefix(line, "+++ b/")
-					break
-				}
-			}
-
-			// Check regex against added lines in this file diff
-			matches := false
-			for _, line := range lines {
-				// Extract original diff line (after line number and colon from AnnotateDiff)
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) < 2 {
-					continue
-				}
-				diffLine := parts[1]
-
-				if strings.HasPrefix(diffLine, "+") && !strings.HasPrefix(diffLine, "+++ ") {
-					addedContent := strings.TrimPrefix(diffLine, "+")
-					for _, re := range compiledRegexes {
-						if re.MatchString(addedContent) {
-							matches = true
-							break
-						}
-					}
-				}
-				if matches {
-					break
-				}
-			}
-
-			if matches {
-				filteredFiles = append(filteredFiles, filename)
-				filteredDiffBuilder.WriteString(fullFd)
-			}
+		fileCtx := ParseAnnotatedFileDiff("diff --git " + fd)
+		if fileCtx.Filename != "" && fileCtx.Matches(nil, nil, compiledRegexes) {
+			finalFiles = append(finalFiles, fileCtx)
 		}
-		files = filteredFiles
-		diff = filteredDiffBuilder.String()
 	}
 
 	return &PRContext{
-		Title:        prInfo.Title,
-		Description:  prInfo.Body,
-		ChangedFiles: files,
-		Diff:         diff,
+		Title:       prInfo.Title,
+		Description: prInfo.Body,
+		Files:       finalFiles,
 	}, nil
+}
+
+func MatchesFilters(file string, includes, excludes []string) bool {
+	if !pathIncluded(file, includes) {
+		return false
+	}
+
+	if len(excludes) > 0 && pathIncluded(file, excludes) {
+		return false
+	}
+
+	return true
+}
+
+func pathIncluded(path string, globs []string) bool {
+	if len(globs) == 0 {
+		return true
+	}
+	path = strings.TrimPrefix(path, "./")
+	for _, glob := range globs {
+		g := strings.TrimPrefix(glob, "./")
+
+		matched, _ := doublestar.Match(g, path)
+		if matched {
+			return true
+		}
+
+		// If the glob ends with a slash, it should match everything inside that directory.
+		if strings.HasSuffix(g, "/") {
+			matched, _ = doublestar.Match(g+"**", path)
+			if matched {
+				return true
+			}
+		}
+
+		// Keep substring match for simple directory/file names
+		if strings.Contains(path, g) {
+			return true
+		}
+	}
+	return false
 }
 
 func GetFilesForPatterns(branch string, includeFilters, excludeFilters []string) ([]string, error) {
@@ -297,33 +337,7 @@ func GetFilesForPatterns(branch string, includeFilters, excludeFilters []string)
 			continue
 		}
 
-		included := false
-		if len(includeFilters) == 0 {
-			included = true
-		} else {
-			for _, pattern := range includeFilters {
-				matched, _ := filepath.Match(pattern, file)
-				if matched || strings.Contains(file, pattern) {
-					included = true
-					break
-				}
-			}
-		}
-
-		if !included {
-			continue
-		}
-
-		excluded := false
-		for _, ex := range excludeFilters {
-			matched, _ := filepath.Match(ex, file)
-			if matched || strings.Contains(file, ex) {
-				excluded = true
-				break
-			}
-		}
-
-		if !excluded {
+		if MatchesFilters(file, includeFilters, excludeFilters) {
 			result = append(result, file)
 		}
 	}
@@ -413,10 +427,10 @@ func GetChangedFiles(baseSHA, headSHA string, includeFilters, excludeFilters []s
 	return files, nil
 }
 
-func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAnalyses map[string][]string, summary string) string {
+func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAnalyses map[string][]string, summary string, matchedPrimers []PrimerMatch, primerTypes map[string]PrimerType) string {
 	var fileList strings.Builder
-	for _, file := range ctx.ChangedFiles {
-		fileList.WriteString(file)
+	for _, file := range ctx.ChangedFiles() {
+		fileList.WriteString(fmt.Sprintf("- %s", file))
 		if len(p.IncludeExplainers) > 0 {
 			if analyses, ok := preRunAnalyses[file]; ok {
 				for _, analysis := range analyses {
@@ -444,15 +458,40 @@ func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAna
 
 	findingsText := ""
 	if p.IncludeFindings && summary != "" {
-		findingsText = fmt.Sprintf("\n\n--- AGGREGATED REPORT ---\n%s\n", summary)
+		findingsText = fmt.Sprintf("\n---\n# AGGREGATED REPORT\n%s\n", summary)
+	}
+
+	primersSection := ""
+	if len(matchedPrimers) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n---\n# PRIMERS\n")
+		sb.WriteString("The following primers apply to certain files being analyzed. Primers provide extra context, constraints, or blueprints for specific types of changes.\n\n")
+		for _, pm := range matchedPrimers {
+			typeName := pm.Primer.Type
+			typeDesc := ""
+			if pt, ok := primerTypes[typeName]; ok {
+				typeDesc = pt.Description
+			}
+
+			sb.WriteString(fmt.Sprintf("## Primer: %s (Type: %s)\n", pm.Primer.ID, typeName))
+			if typeDesc != "" {
+				sb.WriteString(fmt.Sprintf("**Type Intent:** %s\n\n", typeDesc))
+			}
+			sb.WriteString(fmt.Sprintf("**Applies to:**\n\n- %s", strings.Join(pm.Files, "\n- ")))
+			sb.WriteString("### Content:\n")
+			sb.WriteString(pm.Primer.Content)
+			sb.WriteString("\n\n")
+		}
+		primersSection = sb.String()
 	}
 
 	diffSection := ""
+	fullDiff := ctx.FullDiff()
 	if p.ExcludeDiff {
 		// Calculate diff stats
 		addedLines := 0
 		deletedLines := 0
-		scanner := bufio.NewScanner(strings.NewReader(ctx.Diff))
+		scanner := bufio.NewScanner(strings.NewReader(fullDiff))
 		for scanner.Scan() {
 			line := scanner.Text()
 			// Extract original diff line (after line number and colon)
@@ -467,31 +506,41 @@ func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAna
 				deletedLines++
 			}
 		}
-		diffSection = fmt.Sprintf("\nDiff Stats: %d files changed, %d lines added, %d lines deleted. (Full diff excluded by configuration)\n", len(ctx.ChangedFiles), addedLines, deletedLines)
+		diffSection = fmt.Sprintf("\n---\n# DIFF STATS\n%d files changed, %d lines added, %d lines deleted. (Full diff excluded by configuration)\n", len(ctx.Files), addedLines, deletedLines)
 	} else {
 		fence := "```"
 		diffSection = fmt.Sprintf(`
+---
+# UNIFIED DIFF
 This is a unified diff format where each line is prefixed with a line number (e.g., "123:"). Lines starting with "-" after the line number indicate removed lines, lines starting with "+" after the line number indicate added lines, and lines starting with " " (space) are unchanged context lines. Diff chunks begin with "@@ -old_start,old_count +new_start,new_count @@" headers that may include function/class context, and are preceded by +++ lines indicating the file being modified.
 
-Unified Diff:
 %sdiff
 %s
 %s
-`, fence, ctx.Diff, fence)
+`, fence, fullDiff, fence)
 	}
 
-	prompt := fmt.Sprintf(`%s
+	prompt := fmt.Sprintf(`# PERSONA INSTRUCTIONS
 %s
-PR Title: %s
-PR Description: %s
+%s
+%s
 
-Changed Files:
+---
+# PR METADATA
+## Title
+%s
+
+## Description
+%s
+
+---
+# CHANGED FILES
 %s
 %s
-`, p.Instructions, findingsText, ctx.Title, ctx.Description, fileList.String(), diffSection)
+`, p.Instructions, findingsText, primersSection, ctx.Title, ctx.Description, fileList.String(), diffSection)
 
 	if globalInstructions != "" {
-		prompt += fmt.Sprintf("\nStandard Instructions:\n%s\n", globalInstructions)
+		prompt += fmt.Sprintf("\n---\n# STANDARD INSTRUCTIONS\n%s\n", globalInstructions)
 	}
 
 	if p.Role == "explainer" && p.Stage == "pre" {

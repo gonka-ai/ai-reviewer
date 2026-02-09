@@ -10,6 +10,11 @@ import (
 type Config struct {
 	ModelMapping       map[string]ModelConfig `yaml:"model_mapping"`
 	GlobalInstructions string                 `yaml:"global_instructions"`
+	PrimerTypes        map[string]PrimerType  `yaml:"primer_types"`
+}
+
+type PrimerType struct {
+	Description string `yaml:"description"`
 }
 
 type ModelConfig struct {
@@ -23,6 +28,7 @@ type ModelConfig struct {
 func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, error) {
 	finalConfig := &Config{
 		ModelMapping: make(map[string]ModelConfig),
+		PrimerTypes:  make(map[string]PrimerType),
 	}
 
 	found := false
@@ -53,6 +59,10 @@ func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, 
 		// Merge model mappings
 		for k, v := range cfg.ModelMapping {
 			finalConfig.ModelMapping[k] = v
+		}
+		// Merge primer types
+		for k, v := range cfg.PrimerTypes {
+			finalConfig.PrimerTypes[k] = v
 		}
 		if cfg.GlobalInstructions != "" {
 			finalConfig.GlobalInstructions = cfg.GlobalInstructions

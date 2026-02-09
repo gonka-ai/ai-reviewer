@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +22,7 @@ type RunLogEntry struct {
 	TimeMS      int64     `json:"time_ms"`
 	RawOutput   string    `json:"raw_output,omitempty"`
 	Findings    []Finding `json:"findings,omitempty"`
+	Primers     []string  `json:"primers,omitempty"`
 	InputPrice  float64   `json:"input_price,omitempty"`  // Price per million tokens
 	OutputPrice float64   `json:"output_price,omitempty"` // Price per million tokens
 }
@@ -144,12 +146,14 @@ type RunSettings struct {
 	Concurrency  int
 	InitialCwd   string
 	ExeDir       string
+	DryRun       bool
 }
 
 type RunConfig struct {
 	Settings      *RunSettings
 	Config        *Config
 	Personas      []Persona
+	Primers       []Primer
 	PRInfo        *PRInfo
 	GlobalContext *PRContext
 	RunDir        string
@@ -168,6 +172,10 @@ type RunConfig struct {
 }
 
 func NewRunSettings() *RunSettings {
+	return NewRunSettingsFromArgs(os.Args)
+}
+
+func NewRunSettingsFromArgs(args []string) *RunSettings {
 	initialCwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Error getting current working directory: %v", err)
@@ -185,20 +193,43 @@ func NewRunSettings() *RunSettings {
 		ExeDir:      exeDir,
 	}
 
-	if len(os.Args) < 2 {
+	if len(args) < 2 {
 		s.PrintUsage()
 		os.Exit(1)
 	}
 
-	s.Command = os.Args[1]
+	// Find the first non-flag argument to be the command
+	var command string
+	var commandIdx int = -1
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			if arg == "pr" || arg == "commit" || arg == "file" {
+				command = arg
+				commandIdx = i
+				break
+			}
+		}
+	}
+
+	if command == "" {
+		s.PrintUsage()
+		os.Exit(0)
+	}
+
+	s.Command = command
+
+	// All other arguments are passed to the sub-command parser
+	subArgs := append([]string{}, args[1:commandIdx]...)
+	subArgs = append(subArgs, args[commandIdx+1:]...)
 
 	switch s.Command {
 	case "pr":
-		s.parsePRArgs(os.Args[2:])
+		s.parsePRArgs(subArgs)
 	case "commit":
-		s.parseCommitArgs(os.Args[2:])
+		s.parseCommitArgs(subArgs)
 	case "file":
-		s.parseFileArgs(os.Args[2:])
+		s.parseFileArgs(subArgs)
 	default:
 		fmt.Printf("Unknown command: %s\n", s.Command)
 		s.PrintUsage()
@@ -302,9 +333,14 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 		return nil, fmt.Errorf("error loading config: %w. Make sure .ai-review/%s/config.yaml exists in one of %v", err, s.Repo, rc.SearchPaths)
 	}
 
-	rc.Personas, err = LoadPersonas(rc.SearchPaths, s.Repo, rc.OutputHandler)
+	rc.Personas, err = LoadPersonas(rc.SearchPaths, s.Repo, rc.PRInfo.HeadRefOid, rc.OutputHandler)
 	if err != nil {
 		return nil, fmt.Errorf("error loading personas: %w. Make sure .ai-review/%s/personas/*.md exist in one of %v", err, s.Repo, rc.SearchPaths)
+	}
+
+	rc.Primers, err = LoadPrimers(rc.SearchPaths, s.Repo, rc.PRInfo.HeadRefOid, rc.OutputHandler)
+	if err != nil {
+		return nil, fmt.Errorf("error loading primers: %w", err)
 	}
 
 	// 4. Extract context
@@ -322,6 +358,10 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 
 	// 6. Filter personas
 	rc.filterPersonas()
+
+	if s.DryRun {
+		return rc, nil
+	}
 
 	// 7. Initialize common clients
 	balancedCfg, ok := rc.Config.ModelMapping[string(BestCode)]
@@ -366,7 +406,7 @@ func (rc *RunConfig) filterPersonas() {
 		}
 
 		run := PersonaRun{Persona: p, Context: personaContext}
-		skip := len(personaContext.ChangedFiles) == 0
+		skip := len(personaContext.Files) == 0
 
 		if p.Role == "explainer" {
 			if p.Stage == "pre" {
@@ -394,12 +434,15 @@ func (rc *RunConfig) filterPersonas() {
 	rc.OutputHandler.Println("    To be run:")
 	for _, r := range rc.PreRunToRun {
 		rc.OutputHandler.Printf("      - %s (explainer, pre)\n", r.Persona.ColoredID)
+		rc.printMatchedPrimers(r.Context)
 	}
 	for _, r := range rc.ReviewersToRun {
 		rc.OutputHandler.Printf("      - %s (reviewer)\n", r.Persona.ColoredID)
+		rc.printMatchedPrimers(r.Context)
 	}
 	for _, r := range rc.PostRunToRun {
 		rc.OutputHandler.Printf("      - %s (explainer, post)\n", r.Persona.ColoredID)
+		rc.printMatchedPrimers(r.Context)
 	}
 
 	if len(rc.PreRunToSkip) > 0 || len(rc.ReviewersToSkip) > 0 || len(rc.PostRunToSkip) > 0 {
@@ -416,16 +459,25 @@ func (rc *RunConfig) filterPersonas() {
 	}
 }
 
+func (rc *RunConfig) printMatchedPrimers(personaContext *PRContext) {
+	matches := rc.FindMatches(personaContext)
+	for _, m := range matches {
+		rc.OutputHandler.Printf("        with primer: %s (matches %d files)\n", m.Primer.ID, len(m.Files))
+	}
+}
+
 func (s *RunSettings) parsePRArgs(args []string) {
 	fs := flag.NewFlagSet("pr", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
-	fs.Parse(args)
+	remaining, _ := parseInterspersed(fs, args)
+
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.DryRun = *dryRun
 
-	remaining := fs.Args()
 	if len(remaining) < 2 {
 		s.PrintUsage()
 		os.Exit(1)
@@ -439,13 +491,15 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	compareTo := fs.String("compare-to", "", "Specific commit to compare to (default: parent)")
+	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
-	fs.Parse(args)
+	remaining, _ := parseInterspersed(fs, args)
+
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
 	s.CompareTo = *compareTo
+	s.DryRun = *dryRun
 
-	remaining := fs.Args()
 	if len(remaining) < 2 {
 		s.PrintUsage()
 		os.Exit(1)
@@ -458,12 +512,14 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	fs := flag.NewFlagSet("file", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
-	fs.Parse(args)
+	remaining, _ := parseInterspersed(fs, args)
+
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.DryRun = *dryRun
 
-	remaining := fs.Args()
 	if len(remaining) < 3 {
 		s.PrintUsage()
 		os.Exit(1)
@@ -475,9 +531,9 @@ func (s *RunSettings) parseFileArgs(args []string) {
 
 func (s *RunSettings) PrintUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--max-tokens <n>] [--concurrency <n>]")
-	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--max-tokens <n>] [--concurrency <n>]")
-	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--max-tokens <n>] [--concurrency <n>]")
+	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
 }
 
 func (s *RunSettings) TargetID() string {
@@ -508,6 +564,23 @@ func (s *RunSettings) IsFile() bool {
 func (s *RunSettings) RunDir() string {
 	runID := time.Now().Format("2006-01-02_15-04-05")
 	return filepath.Join(s.InitialCwd, ".ai-review", s.Repo, "runs", s.TargetID(), runID)
+}
+
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positionals []string
+	for len(args) > 0 {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		remaining := fs.Args()
+		if len(remaining) > 0 {
+			positionals = append(positionals, remaining[0])
+			args = remaining[1:]
+		} else {
+			args = nil
+		}
+	}
+	return positionals, nil
 }
 
 func printCurrentDir() {
