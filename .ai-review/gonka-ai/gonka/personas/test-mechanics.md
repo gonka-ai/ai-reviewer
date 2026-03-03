@@ -1,6 +1,6 @@
 ---
 id: test-mechanics
-model_category: cheap
+model_category: balanced
 path_filters:
   - "**/*_test.go"
 ---

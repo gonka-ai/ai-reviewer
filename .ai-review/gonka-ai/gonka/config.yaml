@@ -1,18 +1,4 @@
 model_mapping:
-  fastest_good:
-    provider: gemini
-    model: gemini-3-flash-preview
-    max_tokens: 16384
-    input_price_per_million: 0.50
-    output_price_per_million: 3.00
-
-  balanced:
-    provider: gemini
-    model: gemini-2.5-flash
-    max_tokens: 4096
-    input_price_per_million: 0.30
-    output_price_per_million: 2.50
-
   cheap:
     provider: gemini
     model: gemini-2.5-flash-lite
@@ -20,16 +6,35 @@ model_mapping:
     input_price_per_million: 0.10
     output_price_per_million: 0.40
 
-  best_code:
+  balanced:
+    provider: gemini
+    model: gemini-2.5-flash
+    max_tokens: 16384
+    input_price_per_million: 0.30
+    output_price_per_million: 2.50
+
+  fastest_good:
     provider: gemini
     model: gemini-3-flash-preview
-    max_tokens: 8192
+    max_tokens: 16384
+    input_price_per_million: 0.50
+    output_price_per_million: 3.00
+
+  best_code:
+#    provider: gemini
+#    model: gemini-3-pro-preview
+#    max_tokens: 16384
+#    input_price_per_million: 2.00
+#    output_price_per_million: 12.00
+    provider: gemini
+    model: gemini-3-flash-preview
+    max_tokens: 16384
     input_price_per_million: 0.50
     output_price_per_million: 3.00
 
   frontier_best:
     provider: gemini
-    model: gemini-3-pro-preview
+    model: gemini-3.1-pro-preview
     max_tokens: 4096
     input_price_per_million: 2.00
     output_price_per_million: 12.00
@@ -53,3 +58,4 @@ global_instructions: |
   4. Keep your output concise and actionable so reviewers can decide and act quickly.
   5. Review code modified or added by THIS PR ONLY. Do not review code that is merely adjacent to these changes, that is included solely for context.
   5. Do NOT do any reviews or checks outside of your explicit instructions. Focus entirely on YOUR instructions.
+  7. You do not necessarily have ALL changes in this PR in your context. Focus on your prompt, don't make inferences about missing features unless that's your job.

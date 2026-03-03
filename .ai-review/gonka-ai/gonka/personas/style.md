@@ -1,7 +1,6 @@
 ---
 id: style
 model_category: fastest_good
-max_tokens: 4096
 path_filters: ["**/*.go"]
 exclude_filters: ["**/*.pb.go", "**/*.pulsar.go"]
 ---

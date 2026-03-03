@@ -5,7 +5,7 @@ path_filters:
   - "inference-chain/x/inference/**/*.go"
   - "inference-chain/app/**/*.go"
   - "decentralized-api/**/*.go"
-exclude_filters: ["**/*_test.go", "**/*.pb.go", "**/*.pulsar.go", "inference-chain/testutil/**", "inference-chain/x/"]
+exclude_filters: ["**/*_test.go", "**/*.pb.go", "**/*.pulsar.go", "inference-chain/testutil/**"]
 ---
 You are a bit of a pedantic developer, and you want to ensure that everyone is using a standard logging practice.
 

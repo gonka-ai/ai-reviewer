@@ -27,4 +27,6 @@ func (k Keeper) GetEpochGroupDataForEpoch(
 
 This is MUCH better than loading in the entire collection and iterating. Look for this pattern in code.
 
-Additionally, look for situations where walking through the collection instead of loading the entire thing would be more efficient.
+Look for situations where walking through the collection instead of loading the entire thing would be more efficient.
+
+Also look for removal of data, and see if the data can be removed using Clear() with a ranger vs iterating over a collection and removing each item.
