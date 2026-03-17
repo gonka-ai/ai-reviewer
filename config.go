@@ -21,6 +21,7 @@ type ModelConfig struct {
 	Provider              string  `yaml:"provider"`
 	Model                 string  `yaml:"model"`
 	MaxTokens             int     `yaml:"max_tokens"`
+	ReasoningLevel        string  `yaml:"reasoning_level,omitempty"` // none | low | medium | high
 	InputPricePerMillion  float64 `yaml:"input_price_per_million"`
 	OutputPricePerMillion float64 `yaml:"output_price_per_million"`
 }

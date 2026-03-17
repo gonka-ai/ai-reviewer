@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
+	"github.com/karagenc/go-pathspec"
 )
 
 type PRInfo struct {
@@ -440,29 +440,18 @@ func pathIncluded(path string, globs []string) bool {
 	if len(globs) == 0 {
 		return true
 	}
-	path = strings.TrimPrefix(path, "./")
-	for _, glob := range globs {
-		g := strings.TrimPrefix(glob, "./")
-
-		matched, _ := doublestar.Match(g, path)
-		if matched {
-			return true
-		}
-
-		// If the glob ends with a slash, it should match everything inside that directory.
-		if strings.HasSuffix(g, "/") {
-			matched, _ = doublestar.Match(g+"**", path)
-			if matched {
-				return true
-			}
-		}
-
-		// Keep substring match for simple directory/file names
-		if strings.Contains(path, g) {
-			return true
-		}
+	// pathspec.Match trims leading ./ from path, but it doesn't trim it from patterns.
+	// So we trim it from patterns ourselves.
+	cleanGlobs := make([]string, len(globs))
+	for i, g := range globs {
+		cleanGlobs[i] = strings.TrimPrefix(g, "./")
 	}
-	return false
+
+	spec, err := pathspec.FromLines(cleanGlobs...)
+	if err != nil {
+		return false
+	}
+	return spec.Match(path)
 }
 
 func GetFilesForPatterns(branch string, includeFilters, excludeFilters []string) ([]string, error) {

@@ -15,16 +15,18 @@ import (
 )
 
 type RunLogEntry struct {
-	PersonaID   string    `json:"persona_id"`
-	Model       string    `json:"model"`
-	TokensIn    int       `json:"tokens_in"`
-	TokensOut   int       `json:"tokens_out"`
-	TimeMS      int64     `json:"time_ms"`
-	RawOutput   string    `json:"raw_output,omitempty"`
-	Findings    []Finding `json:"findings,omitempty"`
-	Primers     []string  `json:"primers,omitempty"`
-	InputPrice  float64   `json:"input_price,omitempty"`  // Price per million tokens
-	OutputPrice float64   `json:"output_price,omitempty"` // Price per million tokens
+	PersonaID       string    `json:"persona_id"`
+	Model           string    `json:"model"`
+	TokensIn        int       `json:"tokens_in"`
+	TokensOut       int       `json:"tokens_out"`
+	TokensReasoning int       `json:"tokens_reasoning,omitempty"`
+	TimeMS          int64     `json:"time_ms"`
+	RawOutput       string    `json:"raw_output,omitempty"`
+	Findings        []Finding `json:"findings,omitempty"`
+	Primers         []string  `json:"primers,omitempty"`
+	InputPrice      float64   `json:"input_price,omitempty"`  // Price per million tokens
+	OutputPrice     float64   `json:"output_price,omitempty"` // Price per million tokens
+	FinishReason    string    `json:"finish_reason,omitempty"`
 }
 
 type RunResults struct {
@@ -126,18 +128,23 @@ func (rr *RunResults) GetStatsString() string {
 	// Token/cost summaries
 	totalTokensIn := 0
 	totalTokensOut := 0
+	totalTokensReasoning := 0
 	totalCost := 0.0
 
 	for _, entry := range rr.Stats {
 		totalTokensIn += entry.TokensIn
 		totalTokensOut += entry.TokensOut
+		totalTokensReasoning += entry.TokensReasoning
 		cost := (float64(entry.TokensIn) * entry.InputPrice / 1000000.0) +
-			(float64(entry.TokensOut) * entry.OutputPrice / 1000000.0)
+			(float64(entry.TokensOut+entry.TokensReasoning) * entry.OutputPrice / 1000000.0)
 		totalCost += cost
 	}
 
 	sb.WriteString(fmt.Sprintf("tokens_in=%d\n", totalTokensIn))
 	sb.WriteString(fmt.Sprintf("tokens_out=%d\n", totalTokensOut))
+	if totalTokensReasoning > 0 {
+		sb.WriteString(fmt.Sprintf("tokens_reasoning=%d\n", totalTokensReasoning))
+	}
 	sb.WriteString(fmt.Sprintf("total_cost=%.6f\n", totalCost))
 
 	return sb.String()
@@ -466,7 +473,7 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 	if !ok {
 		return nil, fmt.Errorf("'balanced' model mapping not found in config.yaml")
 	}
-	rc.BalancedClient, err = GetModelClient(ctx, balancedCfg.Provider, balancedCfg.Model)
+	rc.BalancedClient, err = GetModelClient(ctx, balancedCfg.Provider, balancedCfg.Model, balancedCfg.ReasoningLevel)
 	if err != nil {
 		return nil, fmt.Errorf("error creating balanced client: %w", err)
 	}
@@ -475,7 +482,7 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 	if !ok {
 		fastestCfg = balancedCfg
 	}
-	rc.FastestClient, err = GetModelClient(ctx, fastestCfg.Provider, fastestCfg.Model)
+	rc.FastestClient, err = GetModelClient(ctx, fastestCfg.Provider, fastestCfg.Model, fastestCfg.ReasoningLevel)
 	if err != nil {
 		rc.FastestClient = rc.BalancedClient
 	}

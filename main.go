@@ -41,7 +41,6 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	runResults := NewRunResults()
 	runResults.SetDiffStats(runConfig.GlobalContext)
 
-	// 7. Execute Personas
 	concurrency := s.Concurrency
 	sem := make(chan struct{}, concurrency)
 
@@ -72,13 +71,15 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	// Log Aggregation usage
 	balancedCfg := runConfig.Config.ModelMapping[string(BestCode)]
 	aggEntry := RunLogEntry{
-		PersonaID:   "aggregator",
-		Model:       aggResult.Model,
-		TokensIn:    aggResult.TokensIn,
-		TokensOut:   aggResult.TokensOut,
-		TimeMS:      aggElapsed.Milliseconds(),
-		InputPrice:  balancedCfg.InputPricePerMillion,
-		OutputPrice: balancedCfg.OutputPricePerMillion,
+		PersonaID:       "aggregator",
+		Model:           aggResult.Model,
+		TokensIn:        aggResult.TokensIn,
+		TokensOut:       aggResult.TokensOut,
+		TokensReasoning: aggResult.TokensReasoning,
+		TimeMS:          aggElapsed.Milliseconds(),
+		InputPrice:      balancedCfg.InputPricePerMillion,
+		OutputPrice:     balancedCfg.OutputPricePerMillion,
+		FinishReason:    aggResult.FinishReason,
 	}
 	runResults.AddStat(aggEntry)
 	runConfig.OutputHandler.LogRun(aggEntry)
@@ -156,36 +157,57 @@ func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResult
 	out.WriteString("## Stats\n")
 	totalIn := 0
 	totalOut := 0
+	totalReasoning := 0
 	totalCost := 0.0
 
 	type mStats struct {
-		in, out int
-		cost    float64
+		in, out, reasoning int
+		cost               float64
 	}
 	modelStats := make(map[string]mStats)
 
 	for _, s := range rr.Stats {
 		cost := (float64(s.TokensIn) * s.InputPrice / 1000000.0) +
-			(float64(s.TokensOut) * s.OutputPrice / 1000000.0)
+			(float64(s.TokensOut+s.TokensReasoning) * s.OutputPrice / 1000000.0)
 
-		out.WriteString(fmt.Sprintf("- %s (%s): In: %d, Out: %d, Time: %dms, Cost: $%.6f\n", oh.LinkPersonas(oh.MarkPersona(s.PersonaID)), s.Model, s.TokensIn, s.TokensOut, s.TimeMS, cost))
+		warning := ""
+		if s.FinishReason != "" && s.FinishReason != "STOP" && s.FinishReason != "stop" && s.FinishReason != "end_turn" && s.FinishReason != "FinishReasonStop" {
+			warning = fmt.Sprintf(" ⚠️ **Warning: %s**", s.FinishReason)
+		}
+
+		reasoningStr := ""
+		if s.TokensReasoning > 0 {
+			reasoningStr = fmt.Sprintf(" (Thinking: %d)", s.TokensReasoning)
+		}
+
+		out.WriteString(fmt.Sprintf("- %s (%s): In: %d, Out: %d%s, Time: %dms, Cost: $%.6f%s\n", oh.LinkPersonas(oh.MarkPersona(s.PersonaID)), s.Model, s.TokensIn, s.TokensOut, reasoningStr, s.TimeMS, cost, warning))
 		totalIn += s.TokensIn
 		totalOut += s.TokensOut
+		totalReasoning += s.TokensReasoning
 		totalCost += cost
 
 		ms := modelStats[s.Model]
 		ms.in += s.TokensIn
 		ms.out += s.TokensOut
+		ms.reasoning += s.TokensReasoning
 		ms.cost += cost
 		modelStats[s.Model] = ms
 	}
 
-	out.WriteString(fmt.Sprintf("\nTotal Tokens: %d (In: %d, Out: %d)\n", totalIn+totalOut, totalIn, totalOut))
+	totalTokensStr := fmt.Sprintf("%d (In: %d, Out: %d)", totalIn+totalOut, totalIn, totalOut)
+	if totalReasoning > 0 {
+		totalTokensStr += fmt.Sprintf(", Thinking: %d", totalReasoning)
+	}
+	out.WriteString(fmt.Sprintf("\nTotal Tokens: %s\n", totalTokensStr))
 	out.WriteString(fmt.Sprintf("Total Wall Time: %s\n", rr.TotalElapsed.Round(time.Millisecond)))
 
 	out.WriteString("\n### Usage by Model\n")
 	for model, ms := range modelStats {
-		out.WriteString(fmt.Sprintf("- %s: %d tokens (In: %d, Out: %d), Cost: $%.6f\n", model, ms.in+ms.out, ms.in, ms.out, ms.cost))
+		usageStr := fmt.Sprintf("%d tokens (In: %d, Out: %d)", ms.in+ms.out, ms.in, ms.out)
+		if ms.reasoning > 0 {
+			usageStr += fmt.Sprintf(", Thinking: %d", ms.reasoning)
+		}
+		out.WriteString(fmt.Sprintf("- %s: %s, Cost: $%.6f\n", model, usageStr, ms.cost))
 	}
 	out.WriteString(fmt.Sprintf("\n### Estimated Total Cost: $%.6f\n", totalCost))
 

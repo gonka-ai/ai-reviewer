@@ -126,6 +126,20 @@ func TestMatchesFilters(t *testing.T) {
 			excludes: nil,
 			want:     true,
 		},
+		{
+			name:     "very wild card",
+			file:     "toplevel/subnet/file.go",
+			includes: []string{"**subnet**"},
+			excludes: nil,
+			want:     true,
+		},
+		{
+			name:     "very wild card 2",
+			file:     "toplevel/dir/msg_subnet_something.go",
+			includes: []string{"**subnet**"},
+			excludes: nil,
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -244,6 +258,30 @@ func TestPathIncluded(t *testing.T) {
 			name:  "Substring match",
 			path:  "pkg/utils/helper.go",
 			globs: []string{"utils"},
+			want:  true,
+		},
+		{
+			name:  "Recursive substring match with **",
+			path:  "toplevel/subnet/file.go",
+			globs: []string{"**subnet**"},
+			want:  true,
+		},
+		{
+			name:  "Glob without slashes matches anywhere",
+			path:  "toplevel/dir/file.go",
+			globs: []string{"dir"},
+			want:  true,
+		},
+		{
+			name:  "Wildcard without slashes matches anywhere",
+			path:  "toplevel/dir/file.go",
+			globs: []string{"*.go"},
+			want:  true,
+		},
+		{
+			name:  "Directory match with trailing slash",
+			path:  "toplevel/dir/file.go",
+			globs: []string{"toplevel/dir/"},
 			want:  true,
 		},
 	}

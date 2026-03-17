@@ -70,6 +70,11 @@ model_mapping:
     provider: gemini
     model: gemini-3-flash-preview
     max_tokens: 16384
+    reasoning_level: low    # optional: none | low | medium | high
+    # reasoning_level maps to:
+    # - Gemini: ThinkingLevel (low | medium | high)
+    # - OpenAI: ReasoningEffort (low | medium | high)
+    # - Anthropic: Extended Thinking (budget is automatically calculated from max_tokens)
     input_price_per_million: 0.50
     output_price_per_million: 3.00
   balanced:

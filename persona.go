@@ -66,7 +66,7 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		return "", ModelResult{}, 0, nil, fmt.Errorf("no model mapping for category %s", p.ModelCategory)
 	}
 
-	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model)
+	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
 	if err != nil {
 		return "", ModelResult{}, 0, nil, fmt.Errorf("error creating client: %w", err)
 	}
@@ -177,29 +177,33 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		}
 
 		normEntry := RunLogEntry{
-			PersonaID:   "normalization:" + pr.Persona.ID,
-			Model:       normResult.Model,
-			TokensIn:    normResult.TokensIn,
-			TokensOut:   normResult.TokensOut,
-			TimeMS:      normElapsed.Milliseconds(),
-			InputPrice:  fastestCfg.InputPricePerMillion,
-			OutputPrice: fastestCfg.OutputPricePerMillion,
+			PersonaID:       "normalization:" + pr.Persona.ID,
+			Model:           normResult.Model,
+			TokensIn:        normResult.TokensIn,
+			TokensOut:       normResult.TokensOut,
+			TokensReasoning: normResult.TokensReasoning,
+			TimeMS:          normElapsed.Milliseconds(),
+			InputPrice:      fastestCfg.InputPricePerMillion,
+			OutputPrice:     fastestCfg.OutputPricePerMillion,
+			FinishReason:    normResult.FinishReason,
 		}
 		rr.AddStat(normEntry)
 		rc.OutputHandler.LogRun(normEntry)
 	}
 
 	entry := RunLogEntry{
-		PersonaID:   pr.Persona.ID,
-		Model:       result.Model,
-		TokensIn:    result.TokensIn,
-		TokensOut:   result.TokensOut,
-		TimeMS:      elapsed.Milliseconds(),
-		RawOutput:   result.Text,
-		Findings:    findings,
-		Primers:     primerIDs,
-		InputPrice:  rc.Config.ModelMapping[pr.Persona.ModelCategory].InputPricePerMillion,
-		OutputPrice: rc.Config.ModelMapping[pr.Persona.ModelCategory].OutputPricePerMillion,
+		PersonaID:       pr.Persona.ID,
+		Model:           result.Model,
+		TokensIn:        result.TokensIn,
+		TokensOut:       result.TokensOut,
+		TokensReasoning: result.TokensReasoning,
+		TimeMS:          elapsed.Milliseconds(),
+		RawOutput:       result.Text,
+		Findings:        findings,
+		Primers:         primerIDs,
+		InputPrice:      rc.Config.ModelMapping[pr.Persona.ModelCategory].InputPricePerMillion,
+		OutputPrice:     rc.Config.ModelMapping[pr.Persona.ModelCategory].OutputPricePerMillion,
+		FinishReason:    result.FinishReason,
 	}
 
 	rr.AddStat(entry)

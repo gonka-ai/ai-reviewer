@@ -155,7 +155,7 @@ func evaluateWaivers(ctx context.Context, rc *RunConfig, finding Finding, waiver
 		modelCfg = rc.Config.ModelMapping[string(Balanced)]
 	}
 
-	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model)
+	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
 	if err != nil {
 		return nil, WaiverEvaluation{}, err
 	}

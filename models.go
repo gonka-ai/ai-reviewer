@@ -9,9 +9,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/google/generative-ai-go/genai"
 	"github.com/sashabaranov/go-openai"
-	googleoption "google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 var (
@@ -50,11 +49,13 @@ type ModelClient interface {
 }
 
 type ModelResult struct {
-	Text      string
-	TokensIn  int
-	TokensOut int
-	Provider  string
-	Model     string
+	Text            string
+	TokensIn        int
+	TokensOut       int
+	TokensReasoning int
+	Provider        string
+	Model           string
+	FinishReason    string
 }
 
 type ModelCategory string
@@ -68,14 +69,16 @@ const (
 
 // OpenAI Client
 type OpenAIClient struct {
-	client *openai.Client
-	model  string
+	client         *openai.Client
+	model          string
+	reasoningLevel string
 }
 
-func NewOpenAIClient(apiKey, model string) *OpenAIClient {
+func NewOpenAIClient(apiKey, model, reasoningLevel string) *OpenAIClient {
 	return &OpenAIClient{
-		client: openai.NewClient(apiKey),
-		model:  model,
+		client:         openai.NewClient(apiKey),
+		model:          model,
+		reasoningLevel: reasoningLevel,
 	}
 }
 
@@ -105,31 +108,47 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 	if maxTokens > 0 {
 		req.MaxTokens = maxTokens
 	}
+
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		req.ReasoningEffort = c.reasoningLevel
+	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return ModelResult{}, err
 	}
 
+	tokensIn := resp.Usage.PromptTokens
+	tokensOut := resp.Usage.CompletionTokens
+	tokensReasoning := 0
+	if resp.Usage.CompletionTokensDetails != nil {
+		tokensReasoning = resp.Usage.CompletionTokensDetails.ReasoningTokens
+	}
+
 	return ModelResult{
-		Text:      resp.Choices[0].Message.Content,
-		TokensIn:  resp.Usage.PromptTokens,
-		TokensOut: resp.Usage.CompletionTokens,
-		Provider:  "openai",
-		Model:     c.model,
+		Text:            resp.Choices[0].Message.Content,
+		TokensIn:        tokensIn,
+		TokensOut:       tokensOut,
+		TokensReasoning: tokensReasoning,
+		Provider:        "openai",
+		Model:           c.model,
+		FinishReason:    string(resp.Choices[0].FinishReason),
 	}, nil
 }
 
 // Anthropic Client
 type AnthropicClient struct {
-	client *anthropic.Client
-	model  string
+	client         *anthropic.Client
+	model          string
+	reasoningLevel string
 }
 
-func NewAnthropicClient(apiKey, model string) *AnthropicClient {
+func NewAnthropicClient(apiKey, model, reasoningLevel string) *AnthropicClient {
 	c := anthropic.NewClient(option.WithAPIKey(apiKey))
 	return &AnthropicClient{
-		client: &c,
-		model:  model,
+		client:         &c,
+		model:          model,
+		reasoningLevel: reasoningLevel,
 	}
 }
 
@@ -160,34 +179,78 @@ func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens
 		params.MaxTokens = 4096
 	}
 
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		budget := int64(2048)
+		if params.MaxTokens > 4096 {
+			budget = int64(params.MaxTokens / 2)
+		} else if params.MaxTokens <= 2048 {
+			// Budget must be < max_tokens and >= 1024
+			// If maxTokens is too low, we might need to increase it or skip thinking
+			if params.MaxTokens > 1024 {
+				budget = 1024
+			} else {
+				// Can't enable thinking if max_tokens <= 1024
+				budget = 0
+			}
+		}
+
+		if budget >= 1024 {
+			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
+			// Anthropic requires max_tokens to be GREATER than budget_tokens.
+			// It should be enough to cover thinking + some output.
+			if params.MaxTokens <= budget {
+				params.MaxTokens = budget + 1024
+			}
+		}
+	}
+
 	message, err := c.client.Messages.New(ctx, params)
 	if err != nil {
 		return ModelResult{}, err
 	}
 
+	tokensReasoning := 0
+	text := ""
+	for _, block := range message.Content {
+		if block.Type == "text" {
+			text += block.Text
+		} else if block.Type == "thinking" {
+			// In some versions we might want to collect thinking text,
+			// but for now we just want to ensure we get the output text.
+			// The current SDK doesn't seem to expose thought token count in Usage yet.
+		}
+	}
+
 	return ModelResult{
-		Text:      message.Content[0].Text,
-		TokensIn:  int(message.Usage.InputTokens),
-		TokensOut: int(message.Usage.OutputTokens),
-		Provider:  "anthropic",
-		Model:     c.model,
+		Text:            text,
+		TokensIn:        int(message.Usage.InputTokens),
+		TokensOut:       int(message.Usage.OutputTokens),
+		TokensReasoning: tokensReasoning,
+		Provider:        "anthropic",
+		Model:           c.model,
+		FinishReason:    string(message.StopReason),
 	}, nil
 }
 
 // Gemini Client
 type GeminiClient struct {
-	client *genai.Client
-	model  string
+	client         *genai.Client
+	model          string
+	reasoningLevel string
 }
 
-func NewGeminiClient(ctx context.Context, apiKey, model string) (*GeminiClient, error) {
-	client, err := genai.NewClient(ctx, googleoption.WithAPIKey(apiKey))
+func NewGeminiClient(ctx context.Context, apiKey, model, reasoningLevel string) (*GeminiClient, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
 	if err != nil {
 		return nil, err
 	}
 	return &GeminiClient{
-		client: client,
-		model:  model,
+		client:         client,
+		model:          model,
+		reasoningLevel: reasoningLevel,
 	}, nil
 }
 
@@ -200,65 +263,96 @@ func (c *GeminiClient) GenerateJSON(ctx context.Context, prompt string, maxToken
 }
 
 func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens int, jsonMode bool) (ModelResult, error) {
-	model := c.client.GenerativeModel(c.model)
+	config := &genai.GenerateContentConfig{}
 	if jsonMode {
-		model.ResponseMIMEType = "application/json"
+		config.ResponseMIMEType = "application/json"
 	}
 	if maxTokens > 0 {
-		model.MaxOutputTokens = genai.Ptr(int32(maxTokens))
+		config.MaxOutputTokens = int32(maxTokens)
 	}
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		config.ThinkingConfig = &genai.ThinkingConfig{}
+		switch c.reasoningLevel {
+		case "low":
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
+		case "medium":
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
+		case "high":
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
+		}
+		config.ThinkingConfig.IncludeThoughts = false
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, c.model, genai.Text(prompt), config)
 	if err != nil {
 		return ModelResult{}, err
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+	if len(resp.Candidates) == 0 {
 		return ModelResult{}, fmt.Errorf("empty response from Gemini")
-	}
-
-	text := ""
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if t, ok := part.(genai.Text); ok {
-			text += string(t)
-		}
 	}
 
 	tokensIn := 0
 	tokensOut := 0
+	tokensReasoning := 0
 	if resp.UsageMetadata != nil {
 		tokensIn = int(resp.UsageMetadata.PromptTokenCount)
 		tokensOut = int(resp.UsageMetadata.CandidatesTokenCount)
+		tokensReasoning = int(resp.UsageMetadata.ThoughtsTokenCount)
+	}
+
+	finishReason := string(resp.Candidates[0].FinishReason)
+
+	if len(resp.Candidates[0].Content.Parts) == 0 {
+		return ModelResult{
+			TokensIn:        tokensIn,
+			TokensOut:       tokensOut,
+			TokensReasoning: tokensReasoning,
+			Provider:        "gemini",
+			Model:           c.model,
+			FinishReason:    finishReason,
+		}, nil
+	}
+
+	text := ""
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if part.Text != "" {
+			text += part.Text
+		}
 	}
 
 	return ModelResult{
-		Text:      text,
-		TokensIn:  tokensIn,
-		TokensOut: tokensOut,
-		Provider:  "gemini",
-		Model:     c.model,
+		Text:            text,
+		TokensIn:        tokensIn,
+		TokensOut:       tokensOut,
+		TokensReasoning: tokensReasoning,
+		Provider:        "gemini",
+		Model:           c.model,
+		FinishReason:    finishReason,
 	}, nil
 }
 
-func GetModelClient(ctx context.Context, provider, model string) (ModelClient, error) {
+func GetModelClient(ctx context.Context, provider, model, reasoningLevel string) (ModelClient, error) {
 	switch provider {
 	case "openai":
 		apiKey := getEnv("OPENAI_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY not set")
 		}
-		return NewOpenAIClient(apiKey, model), nil
+		return NewOpenAIClient(apiKey, model, reasoningLevel), nil
 	case "anthropic":
 		apiKey := getEnv("ANTHROPIC_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
 		}
-		return NewAnthropicClient(apiKey, model), nil
+		return NewAnthropicClient(apiKey, model, reasoningLevel), nil
 	case "gemini":
 		apiKey := getEnv("GEMINI_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("GEMINI_API_KEY not set")
 		}
-		return NewGeminiClient(ctx, apiKey, model)
+		return NewGeminiClient(ctx, apiKey, model, reasoningLevel)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
