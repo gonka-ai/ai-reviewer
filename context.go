@@ -626,8 +626,7 @@ func (fs *FilterSet) GetDiff(baseSHA, headSHA string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error running git diff: %w, output: %s", err, string(output))
 	}
-	annDiff, _ := AnnotateDiff(string(output))
-	return annDiff, nil
+	return string(output), nil
 }
 
 var hunkHeaderRegexp = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@`)

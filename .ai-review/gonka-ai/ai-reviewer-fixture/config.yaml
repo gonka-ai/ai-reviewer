@@ -1,0 +1,32 @@
+global_instructions: |
+  Repo-specific instructions should win for the fixture repo.
+  Pay extra attention to branch-specific personas and filter behavior.
+
+model_mapping:
+  balanced:
+    provider: openai
+    model: gpt-5
+    max_tokens: 6000
+    reasoning_level: medium
+    input_price_per_million: 1.25
+    output_price_per_million: 10.00
+  fastest_good:
+    provider: openai
+    model: gpt-5-mini
+    max_tokens: 2000
+    reasoning_level: none
+    input_price_per_million: 0.25
+    output_price_per_million: 2.00
+  best_code:
+    provider: openai
+    model: gpt-5
+    max_tokens: 8000
+    reasoning_level: medium
+    input_price_per_million: 1.25
+    output_price_per_million: 10.00
+
+primer_types:
+  api:
+    description: API handlers should preserve request validation and auth behavior.
+  legacy:
+    description: Legacy paths are risky and should be reviewed carefully.
