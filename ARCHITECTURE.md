@@ -113,7 +113,7 @@ The aggregation path now prefers the `balanced` model category, with a compatibi
 
 The codebase is still small and uses a flat `main` package. The important files are:
 
-- [main.go](/Users/johnlong/GolandProjects/ai-reviewer/main.go): entrypoint and top-level pipeline execution
+- [main.go](ai-reviewer/main.go): entrypoint and top-level pipeline execution
 - [settings.go](/Users/johnlong/GolandProjects/ai-reviewer/settings.go): CLI parsing, run configuration, run planning, output/logging helpers
 - [context.go](/Users/johnlong/GolandProjects/ai-reviewer/context.go): git/GitHub context extraction, diff parsing, filter matching, prompt construction
 - [scanner.go](/Users/johnlong/GolandProjects/ai-reviewer/scanner.go): discovery and loading of personas, primers, and waivers
