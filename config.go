@@ -8,9 +8,11 @@ import (
 )
 
 type Config struct {
-	ModelMapping       map[string]ModelConfig `yaml:"model_mapping"`
-	GlobalInstructions string                 `yaml:"global_instructions"`
-	PrimerTypes        map[string]PrimerType  `yaml:"primer_types"`
+	ModelDefinitions   map[string]ModelConfig            `yaml:"model_definitions"`
+	ModelProfiles      map[string]map[string]ModelConfig `yaml:"model_profiles"`
+	DefaultProfile     string                            `yaml:"default_profile"`
+	GlobalInstructions string                            `yaml:"global_instructions"`
+	PrimerTypes        map[string]PrimerType             `yaml:"primer_types"`
 }
 
 type PrimerType struct {
@@ -18,6 +20,7 @@ type PrimerType struct {
 }
 
 type ModelConfig struct {
+	ID                    string  `yaml:"id,omitempty"`
 	Provider              string  `yaml:"provider"`
 	Model                 string  `yaml:"model"`
 	MaxTokens             int     `yaml:"max_tokens"`
@@ -28,24 +31,70 @@ type ModelConfig struct {
 
 func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, error) {
 	finalConfig := &Config{
-		ModelMapping: make(map[string]ModelConfig),
-		PrimerTypes:  make(map[string]PrimerType),
+		ModelDefinitions: make(map[string]ModelConfig),
+		ModelProfiles:    make(map[string]map[string]ModelConfig),
+		PrimerTypes:      make(map[string]PrimerType),
+	}
+
+	// 1. Load base models.yaml if it exists in any search path
+	for _, base := range searchPaths {
+		for _, dirName := range []string{".ai-review", ".ai-reviewer"} {
+			modelsPath := filepath.Join(base, dirName, "models.yaml")
+			if data, err := os.ReadFile(modelsPath); err == nil {
+				oh.Printf("    -> Loading base models from: %s\n", modelsPath)
+				var defs struct {
+					ModelDefinitions map[string]ModelConfig `yaml:"model_definitions"`
+				}
+				if err := yaml.Unmarshal(data, &defs); err != nil {
+					oh.Printf("Warning: error parsing models at %s: %v\n", modelsPath, err)
+				} else {
+					for k, v := range defs.ModelDefinitions {
+						finalConfig.ModelDefinitions[k] = v
+					}
+				}
+			}
+		}
 	}
 
 	found := false
 	for _, base := range searchPaths {
-		configPath := filepath.Join(base, ".ai-review", repo, "config.yaml")
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			// Fallback to global config if repo-specific doesn't exist?
-			// User said "the tool should look in the local directory .ai-review/gonka-ai/gonka/"
-			// Let's try to look in the old location as well for backward compatibility?
-			// "The local .ai-review should directory should be specific to a specific owner/repo."
-			// If I just change it to look in repo specific, it matches the requirement.
-			configPath = filepath.Join(base, ".ai-review/config.yaml")
+		var configPath string
+		var configDir string
+		var data []byte
+		var err error
+
+		for _, dirName := range []string{".ai-review", ".ai-reviewer"} {
+			configDir = filepath.Join(base, dirName, repo)
+			configPath = filepath.Join(configDir, "config.yaml")
 			data, err = os.ReadFile(configPath)
-			if err != nil {
-				continue
+			if err == nil {
+				break
+			}
+			configDir = filepath.Join(base, dirName)
+			configPath = filepath.Join(configDir, "config.yaml")
+			data, err = os.ReadFile(configPath)
+			if err == nil {
+				break
+			}
+		}
+
+		if err != nil {
+			continue
+		}
+
+		// Look for models.yaml in the same directory as config.yaml
+		modelsPath := filepath.Join(configDir, "models.yaml")
+		if mdata, err := os.ReadFile(modelsPath); err == nil {
+			oh.Printf("    -> Loading models override from: %s\n", modelsPath)
+			var defs struct {
+				ModelDefinitions map[string]ModelConfig `yaml:"model_definitions"`
+			}
+			if err := yaml.Unmarshal(mdata, &defs); err != nil {
+				oh.Printf("Warning: error parsing models at %s: %v\n", modelsPath, err)
+			} else {
+				for k, v := range defs.ModelDefinitions {
+					finalConfig.ModelDefinitions[k] = v
+				}
 			}
 		}
 
@@ -57,9 +106,48 @@ func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, 
 		}
 
 		found = true
-		// Merge model mappings
-		for k, v := range cfg.ModelMapping {
-			finalConfig.ModelMapping[k] = v
+		// Merge model definitions
+		for k, v := range cfg.ModelDefinitions {
+			finalConfig.ModelDefinitions[k] = v
+		}
+
+		// Merge model profiles
+		for profileName, profileMapping := range cfg.ModelProfiles {
+			if _, ok := finalConfig.ModelProfiles[profileName]; !ok {
+				finalConfig.ModelProfiles[profileName] = make(map[string]ModelConfig)
+			}
+			for k, v := range profileMapping {
+				// Resolve model definition if ID is present
+				if v.ID != "" {
+					if def, ok := finalConfig.ModelDefinitions[v.ID]; ok {
+						// Use values from definition if not overridden in v
+						if v.Provider == "" {
+							v.Provider = def.Provider
+						}
+						if v.Model == "" {
+							v.Model = def.Model
+						}
+						if v.MaxTokens == 0 {
+							v.MaxTokens = def.MaxTokens
+						}
+						if v.ReasoningLevel == "" {
+							v.ReasoningLevel = def.ReasoningLevel
+						}
+						if v.InputPricePerMillion == 0 {
+							v.InputPricePerMillion = def.InputPricePerMillion
+						}
+						if v.OutputPricePerMillion == 0 {
+							v.OutputPricePerMillion = def.OutputPricePerMillion
+						}
+					} else {
+						oh.Printf("Warning: model definition '%s' not found for profile '%s' in %s\n", v.ID, profileName, configPath)
+					}
+				}
+				finalConfig.ModelProfiles[profileName][k] = v
+			}
+		}
+		if cfg.DefaultProfile != "" {
+			finalConfig.DefaultProfile = cfg.DefaultProfile
 		}
 		// Merge primer types
 		for k, v := range cfg.PrimerTypes {

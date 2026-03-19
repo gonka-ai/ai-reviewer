@@ -221,6 +221,7 @@ type RunSettings struct {
 	FilePatterns []string
 	MaxTokens    int
 	Concurrency  int
+	ModelProfile string
 	InitialCwd   string
 	ExeDir       string
 	DryRun       bool
@@ -247,6 +248,7 @@ type RunConfig struct {
 	BalancedClient ModelClient
 	FastestClient  ModelClient
 	OutputHandler  *OutputHandler
+	ActiveProfile  string
 }
 
 func NewRunSettings() *RunSettings {
@@ -431,6 +433,45 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 		return nil, fmt.Errorf("error loading config: %w. Make sure .ai-review/%s/config.yaml exists in one of %v", err, s.Repo, rc.SearchPaths)
 	}
 
+	// Determine the active profile early so we can print it
+	rc.ActiveProfile = s.ModelProfile
+	if rc.ActiveProfile == "" {
+		rc.ActiveProfile = rc.Config.DefaultProfile
+	}
+	if rc.ActiveProfile == "" {
+		// Fallback to "default" if nothing specified
+		rc.ActiveProfile = "default"
+	}
+
+	profile, ok := rc.Config.ModelProfiles[rc.ActiveProfile]
+	if !ok {
+		// If requested profile not found, and it's not "default", try "default"
+		if rc.ActiveProfile != "default" {
+			rc.OutputHandler.Printf("    Warning: profile '%s' not found, falling back to 'default'\n", rc.ActiveProfile)
+			rc.ActiveProfile = "default"
+			profile, ok = rc.Config.ModelProfiles[rc.ActiveProfile]
+		}
+	}
+
+	if !ok {
+		// If still not found, just take the first available profile if any
+		if len(rc.Config.ModelProfiles) > 0 {
+			for name, p := range rc.Config.ModelProfiles {
+				rc.OutputHandler.Printf("    Warning: profile not found, falling back to '%s'\n", name)
+				rc.ActiveProfile = name
+				profile = p
+				ok = true
+				break
+			}
+		}
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("no model profiles found in config.yaml")
+	}
+
+	rc.OutputHandler.Printf("--- Using model profile: %s\n", rc.ActiveProfile)
+
 	rc.Personas, err = LoadPersonas(rc.SearchPaths, s.Repo, rc.PRInfo.HeadRefOid, rc.OutputHandler)
 	if err != nil {
 		return nil, fmt.Errorf("error loading personas: %w. Make sure .ai-review/%s/personas/*.md exist in one of %v", err, s.Repo, rc.SearchPaths)
@@ -464,11 +505,11 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 	// 6. Filter personas
 	rc.filterPersonas()
 
+	// 7. Initialize common clients
 	if s.DryRun {
 		return rc, nil
 	}
 
-	// 7. Initialize common clients
 	balancedCfg, err := rc.getAggregationModelConfig()
 	if err != nil {
 		return nil, err
@@ -478,7 +519,7 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 		return nil, fmt.Errorf("error creating balanced client: %w", err)
 	}
 
-	fastestCfg, ok := rc.Config.ModelMapping[string(FastestGood)]
+	fastestCfg, ok := profile[string(FastestGood)]
 	if !ok {
 		fastestCfg = balancedCfg
 	}
@@ -491,14 +532,15 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 }
 
 func (rc *RunConfig) getAggregationModelConfig() (ModelConfig, error) {
-	if cfg, ok := rc.Config.ModelMapping[string(Balanced)]; ok {
+	profile := rc.Config.ModelProfiles[rc.ActiveProfile]
+	if cfg, ok := profile[string(Balanced)]; ok {
 		return cfg, nil
 	}
-	if cfg, ok := rc.Config.ModelMapping[string(BestCode)]; ok {
+	if cfg, ok := profile[string(BestCode)]; ok {
 		rc.OutputHandler.Println("    Warning: 'balanced' model mapping not found; falling back to 'best_code' for aggregation")
 		return cfg, nil
 	}
-	return ModelConfig{}, fmt.Errorf("'balanced' model mapping not found in config.yaml")
+	return ModelConfig{}, fmt.Errorf("'balanced' model mapping not found in profile '%s'", rc.ActiveProfile)
 }
 
 func (rc *RunConfig) filterPersonas() {
@@ -606,12 +648,14 @@ func (s *RunSettings) parsePRArgs(args []string) {
 	fs := flag.NewFlagSet("pr", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
 
 	if len(remaining) < 2 {
@@ -626,6 +670,7 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	compareTo := fs.String("compare-to", "", "Specific commit to compare to (default: parent)")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
@@ -633,6 +678,7 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.ModelProfile = *modelProfile
 	s.CompareTo = *compareTo
 	s.DryRun = *dryRun
 
@@ -648,12 +694,14 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	fs := flag.NewFlagSet("file", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
 
 	if len(remaining) < 3 {
@@ -669,12 +717,14 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	fs := flag.NewFlagSet("branches", flag.ExitOnError)
 	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
+	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
 	s.MaxTokens = *maxTokens
 	s.Concurrency = *concurrency
+	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
 
 	if len(remaining) < 3 {
@@ -688,10 +738,10 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 
 func (s *RunSettings) PrintUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer branches <repo> <base> <head> [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer branches <repo> <base> <head> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
 }
 
 func (s *RunSettings) TargetID() string {

@@ -2,28 +2,102 @@ global_instructions: |
   Repo-specific instructions should win for the fixture repo.
   Pay extra attention to branch-specific personas and filter behavior.
 
-model_mapping:
-  balanced:
-    provider: openai
-    model: gpt-5
-    max_tokens: 6000
-    reasoning_level: medium
-    input_price_per_million: 1.25
-    output_price_per_million: 10.00
-  fastest_good:
-    provider: openai
-    model: gpt-5-mini
-    max_tokens: 2000
-    reasoning_level: none
-    input_price_per_million: 0.25
-    output_price_per_million: 2.00
-  best_code:
-    provider: openai
-    model: gpt-5
-    max_tokens: 8000
-    reasoning_level: medium
-    input_price_per_million: 1.25
-    output_price_per_million: 10.00
+default_profile: gemini_standard
+
+model_profiles:
+  anthropic:
+    cheap:
+      id: anthropic_haiku_3
+    balanced:
+      id: anthropic_haiku_4.5
+    fastest_good:
+      id: anthropic_haiku_4.5
+    best_code:
+      id: anthropic_sonnet_4.6
+      reasoning_level: low
+    frontier_best:
+      id: anthropic_opus_4.6
+
+  anthropic_cheap:
+    cheap:
+      id: anthropic_haiku_3
+    balanced:
+      id: anthropic_haiku_3
+    fastest_good:
+      id: anthropic_haiku_3
+    best_code:
+      id: anthropic_haiku_4.5
+      reasoning_level: low
+    frontier_best:
+      id: anthropic_haiku_4.5
+
+  gemini_low:
+    cheap:
+      id: gemini_2.5_flash_lite
+    balanced:
+      id: gemini_2.5_flash
+    fastest_good:
+      id: gemini_3_flash_preview
+    best_code:
+      id: gemini_3_flash_preview
+      reasoning_level: low
+    frontier_best:
+      id: gemini_3.1_pro_preview
+      reasoning_level: high
+
+  gemini_standard:
+    cheap:
+      id: gemini_2.5_flash_lite
+    balanced:
+      id: gemini_2.5_flash
+    fastest_good:
+      id: gemini_3_flash_preview
+    best_code:
+      id: gemini_3.1_pro_preview
+      reasoning_level: low
+    frontier_best:
+      id: gemini_3.1_pro_preview
+      reasoning_level: high
+
+  gemini_high:
+    cheap:
+      id: gemini_2.5_flash
+    balanced:
+      id: gemini_3_flash_preview
+    fastest_good:
+      id: gemini_3.1_pro_preview
+      reasoning_level: low
+    best_code:
+      id: gemini_3.1_pro_preview
+      reasoning_level: high
+    frontier_best:
+      id: gemini_3.1_pro_preview
+      reasoning_level: high
+
+  openai:
+    cheap:
+      id: gpt_5.4_nano
+    balanced:
+      id: gpt_5.4_mini
+    fastest_good:
+      id: gpt_5.4_mini
+    best_code:
+      id: gpt_5.4
+      reasoning_level: low
+    frontier_best:
+      id: gpt_5.4_pro
+
+  openai_cheap:
+    cheap:
+      id: gpt_5.4_nano
+    balanced:
+      id: gpt_5.4_nano
+    fastest_good:
+      id: gpt_5.4_nano
+    best_code:
+      id: gpt_5.4_mini
+    frontier_best:
+      id: gpt_5.4_mini
 
 primer_types:
   api:

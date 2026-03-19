@@ -16,20 +16,21 @@ See [VISION.md](VISION.md) for the longer rationale and design philosophy.
 ```bash
 go build -o ai-review
 # Review a PR
-./ai-review pr <repo_owner>/<repo_name> <pr_number> [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review pr <repo_owner>/<repo_name> <pr_number> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 
 # Review a specific commit (compared to its parent by default)
-./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 
 # Review specific files on a branch
-./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 
 # Review the diff between two branches
-./ai-review branches <repo_owner>/<repo_name> <base_branch> <head_branch> [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review branches <repo_owner>/<repo_name> <base_branch> <head_branch> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
 ```
 
 ### Global CLI Options
 
+- `--model-profile <name>`: Use a specific model profile from `config.yaml`.
 - `--max-tokens <n>`: Override the maximum tokens for AI responses.
 - `--concurrency <n>`: Set the maximum number of personas to run concurrently (default: 5).
 - `--dry-run`: Scan and report what personas and primers will be applied, but do not execute any AI calls. Useful for testing configuration and filtering logic without incurring costs.
@@ -71,38 +72,63 @@ You do not need to set all three unless your configuration uses all three.
 
 The tool expects repository-specific configuration under `.ai-review/<repo_owner>/<repo_name>/`. The main config file lives at `.ai-review/<repo_owner>/<repo_name>/config.yaml`, and local personas, primers, and waivers also live under that repo-scoped directory tree.
 
-### Model Mapping
+### Model Selection
 
-Create `.ai-review/<repo_owner>/<repo_name>/config.yaml`. You can define multiple model categories and their pricing for cost estimation:
+Model selection is handled through **Definitions** and **Profiles**. This allows you to define models once and reuse them across different tiers (e.g., "cheap", "balanced", "best_code") and switch between entirely different providers (e.g., Gemini vs OpenAI) using a single flag.
+
+#### 1. Model Definitions
+
+Model definitions describe the underlying LLM, its provider, and its pricing. You can define these in `config.yaml` or in a standalone `models.yaml` file for reuse across multiple repositories.
 
 ```yaml
-model_mapping:
-  fastest_good:
+model_definitions:
+  gpt_4o:
+    provider: openai
+    model: gpt-4o
+    max_tokens: 32000
+    input_price_per_million: 2.50
+    output_price_per_million: 10.00
+  gemini_2_flash:
     provider: gemini
-    model: gemini-3-flash-preview
-    max_tokens: 16384
-    reasoning_level: low    # optional: none | low | medium | high
-    # reasoning_level maps to:
-    # - Gemini: ThinkingLevel (low | medium | high)
-    # - OpenAI: ReasoningEffort (low | medium | high)
-    # - Anthropic: Extended Thinking (budget is automatically calculated from max_tokens)
-    input_price_per_million: 0.50
-    output_price_per_million: 3.00
-  balanced:
-    provider: gemini
-    model: gemini-2.5-flash
-    max_tokens: 4096
-    input_price_per_million: 0.30
-    output_price_per_million: 2.50
-
-primer_types:
-  blueprint:
-    description: "Architectural blueprints that must be followed for new or modified components."
-  constraint:
-    description: "Strict constraints or rules that apply to the codebase."
+    model: gemini-2.0-flash
+    max_tokens: 32000
+    input_price_per_million: 0.10
+    output_price_per_million: 0.40
 ```
 
-`max_tokens` here sets the default limit for the category.
+#### 2. Model Profiles
+
+Profiles map abstract categories used by personas (like `cheap`, `balanced`, `best_code`) to specific model definitions. You can also override any definition field (like `reasoning_level`) at the profile level.
+
+```yaml
+default_profile: gemini_standard
+
+model_profiles:
+  gemini_standard:
+    cheap:
+      id: gemini_2_flash
+    balanced:
+      id: gemini_2_flash
+    best_code:
+      id: gemini_1_5_pro
+      reasoning_level: high
+  
+  openai:
+    cheap:
+      id: gpt_4o_mini
+    balanced:
+      id: gpt_4o
+    best_code:
+      id: o1
+```
+
+#### 3. models.yaml
+
+To avoid repeating model definitions in every repository's `config.yaml`, you can create a `models.yaml` file. The tool searches for `models.yaml` in:
+1. `.ai-review/` or `.ai-reviewer/` relative to any search path.
+2. The same directory as your active `config.yaml`.
+
+Definitions in `models.yaml` are merged with those in `config.yaml`.
 
 ### Discovery and Organization
 

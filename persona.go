@@ -58,9 +58,14 @@ func LoadPersonas(searchPaths []string, repo string, headSHA string, oh *OutputH
 }
 
 func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, personaContext *PRContext) (string, ModelResult, time.Duration, []PrimerMatch, error) {
-	modelCfg, ok := rc.Config.ModelMapping[p.ModelCategory]
+	profile, ok := rc.Config.ModelProfiles[rc.ActiveProfile]
 	if !ok {
-		return "", ModelResult{}, 0, nil, fmt.Errorf("no model mapping for category %s", p.ModelCategory)
+		return "", ModelResult{}, 0, nil, fmt.Errorf("active profile %s not found in config", rc.ActiveProfile)
+	}
+
+	modelCfg, ok := profile[p.ModelCategory]
+	if !ok {
+		return "", ModelResult{}, 0, nil, fmt.Errorf("no model mapping for category %s in profile %s", p.ModelCategory, rc.ActiveProfile)
 	}
 
 	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
@@ -167,10 +172,10 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 
 		// Log Normalization usage
 		// We need to find the model config for the fastest model to get its price
-		// Actually we can just look it up from rc.Config.ModelMapping[string(FastestGood)] or just use the one used in NewRunConfig
-		fastestCfg := rc.Config.ModelMapping[string(FastestGood)]
+		profile := rc.Config.ModelProfiles[rc.ActiveProfile]
+		fastestCfg := profile[string(FastestGood)]
 		if fastestCfg.Model == "" { // Fallback if not found
-			fastestCfg = rc.Config.ModelMapping[string(Balanced)]
+			fastestCfg = profile[string(Balanced)]
 		}
 
 		normEntry := RunLogEntry{
@@ -198,8 +203,8 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		RawOutput:       result.Text,
 		Findings:        findings,
 		Primers:         primerIDs,
-		InputPrice:      rc.Config.ModelMapping[pr.Persona.ModelCategory].InputPricePerMillion,
-		OutputPrice:     rc.Config.ModelMapping[pr.Persona.ModelCategory].OutputPricePerMillion,
+		InputPrice:      rc.Config.ModelProfiles[rc.ActiveProfile][pr.Persona.ModelCategory].InputPricePerMillion,
+		OutputPrice:     rc.Config.ModelProfiles[rc.ActiveProfile][pr.Persona.ModelCategory].OutputPricePerMillion,
 		FinishReason:    result.FinishReason,
 	}
 

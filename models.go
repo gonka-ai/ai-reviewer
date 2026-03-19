@@ -106,7 +106,7 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 		}
 	}
 	if maxTokens > 0 {
-		req.MaxTokens = maxTokens
+		req.MaxCompletionTokens = maxTokens
 	}
 
 	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
@@ -204,31 +204,41 @@ func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens
 		}
 	}
 
-	message, err := c.client.Messages.New(ctx, params)
-	if err != nil {
-		return ModelResult{}, err
-	}
-
+	stream := c.client.Messages.NewStreaming(ctx, params)
 	tokensReasoning := 0
 	text := ""
-	for _, block := range message.Content {
-		if block.Type == "text" {
-			text += block.Text
-		} else if block.Type == "thinking" {
-			// In some versions we might want to collect thinking text,
-			// but for now we just want to ensure we get the output text.
-			// The current SDK doesn't seem to expose thought token count in Usage yet.
+	var inputTokens int64
+	var outputTokens int64
+	var stopReason string
+
+	for stream.Next() {
+		event := stream.Current()
+		switch event.Type {
+		case "message_start":
+			inputTokens = event.Message.Usage.InputTokens
+			outputTokens = event.Message.Usage.OutputTokens
+		case "content_block_delta":
+			if event.Delta.Type == "text_delta" {
+				text += event.Delta.Text
+			}
+		case "message_delta":
+			outputTokens = event.Usage.OutputTokens
+			stopReason = string(event.Delta.StopReason)
 		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return ModelResult{}, err
 	}
 
 	return ModelResult{
 		Text:            text,
-		TokensIn:        int(message.Usage.InputTokens),
-		TokensOut:       int(message.Usage.OutputTokens),
+		TokensIn:        int(inputTokens),
+		TokensOut:       int(outputTokens),
 		TokensReasoning: tokensReasoning,
 		Provider:        "anthropic",
 		Model:           c.model,
-		FinishReason:    string(message.StopReason),
+		FinishReason:    stopReason,
 	}, nil
 }
 

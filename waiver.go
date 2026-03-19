@@ -151,9 +151,14 @@ func evaluateWaivers(ctx context.Context, rc *RunConfig, finding Finding, waiver
 		modelCategory = string(FastestGood)
 	}
 
-	modelCfg, ok := rc.Config.ModelMapping[modelCategory]
+	profile, ok := rc.Config.ModelProfiles[rc.ActiveProfile]
 	if !ok {
-		modelCfg = rc.Config.ModelMapping[string(Balanced)]
+		return nil, WaiverEvaluation{}, fmt.Errorf("active profile %s not found in config", rc.ActiveProfile)
+	}
+
+	modelCfg, ok := profile[modelCategory]
+	if !ok {
+		modelCfg = profile[string(Balanced)]
 	}
 
 	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
