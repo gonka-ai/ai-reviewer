@@ -1,8 +1,6 @@
 package main
 
-import (
-	"regexp"
-)
+import ()
 
 type Primer struct {
 	ID       string    `yaml:"id"`
@@ -40,30 +38,17 @@ func LoadPrimers(searchPaths []string, repo string, headSHA string, oh *OutputHa
 func (rc *RunConfig) FindMatches(personaContext *PRContext) []PrimerMatch {
 	var matches []PrimerMatch
 
-	// Pre-compile regexes for all primers
-	type compiledPrimer struct {
-		primer Primer
-		fs     *FilterSet
-	}
-	var compiledPrimers []compiledPrimer
 	for _, p := range rc.Primers {
 		fs := p.Filters
-		for _, r := range fs.RawRegexFilters {
-			re, err := regexp.Compile(r)
-			if err != nil {
-				rc.OutputHandler.Printf("    Warning: invalid regex %s in primer %s: %v\n", r, p.ID, err)
-				continue
-			}
-			fs.RegexFilters = append(fs.RegexFilters, re)
+		if err := fs.Compile(); err != nil {
+			rc.OutputHandler.Printf("    Warning: error compiling filters for primer %s: %v\n", p.ID, err)
+			continue
 		}
-		compiledPrimers = append(compiledPrimers, compiledPrimer{primer: p, fs: &fs})
-	}
 
-	for _, cp := range compiledPrimers {
 		var matchedFiles []string
 		for _, fileCtx := range personaContext.Files {
 			if fileCtx.Matches(FileMatchOptions{
-				FilterSet:  cp.fs,
+				FilterSet:  &fs,
 				Branch:     personaContext.Branch,
 				CommitDate: personaContext.CommitDate,
 			}) {
@@ -73,7 +58,7 @@ func (rc *RunConfig) FindMatches(personaContext *PRContext) []PrimerMatch {
 
 		if len(matchedFiles) > 0 {
 			matches = append(matches, PrimerMatch{
-				Primer: cp.primer,
+				Primer: p,
 				Files:  matchedFiles,
 			})
 		}

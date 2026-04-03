@@ -568,13 +568,9 @@ func (rc *RunConfig) filterPersonas() {
 		skip := true
 		for _, f := range personaContext.Files {
 			// Pre-compile regexes for efficiency
-			if len(fs.RegexFilters) == 0 && len(fs.RawRegexFilters) > 0 {
-				for _, r := range fs.RawRegexFilters {
-					re, err := regexp.Compile(r)
-					if err == nil {
-						fs.RegexFilters = append(fs.RegexFilters, re)
-					}
-				}
+			if err := fs.Compile(); err != nil {
+				rc.OutputHandler.Printf("    Warning: error compiling filters for persona %s: %v\n", p.ColoredID, err)
+				break
 			}
 			if f.Matches(FileMatchOptions{
 				FilterSet:  &fs,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -80,11 +79,9 @@ func ApplyWaivers(ctx context.Context, rc *RunConfig, rr *RunResults) {
 			}
 
 			fs := w.Filters
-			for _, r := range fs.RawRegexFilters {
-				re, err := regexp.Compile(r)
-				if err == nil {
-					fs.RegexFilters = append(fs.RegexFilters, re)
-				}
+			if err := fs.Compile(); err != nil {
+				rc.OutputHandler.Printf("    Warning: error compiling filters for waiver %s: %v\n", w.ID, err)
+				continue
 			}
 
 			if fileCtx.Matches(FileMatchOptions{

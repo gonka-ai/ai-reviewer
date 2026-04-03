@@ -159,6 +159,14 @@ exclude_filters:        # optional: ignore these files
   - "**/*_test.go"
 regex_filters:          # optional: only include files where changed lines match any of these regexes
   - "TODO"
+any:                    # optional: logical OR between sub-filters
+  - path_filters: ["src/legacy/**"]
+  - regex_filters: ["TODO: rewrite"]
+all:                    # optional: logical AND between sub-filters
+  - path_filters: ["**/*.go"]
+  - any:
+      - function_filters: ["HandleRequest"]
+      - regex_filters: ["auth_check"]
 branch_filters:         # optional: only apply to specific branch globs
   - "main"
   - "release/*"
@@ -177,6 +185,15 @@ You are a security expert. Review the following PR for security vulnerabilities.
 - **Reviewer**: (Default) Analyzes the code and produces findings. Findings are automatically normalized into structured data and later aggregated.
 - **Explainer (Pre)**: Runs before reviewers. Must output JSON (file-to-analysis mapping). Its analysis is injected into the context of all subsequent personas for that file.
 - **Explainer (Post)**: Runs after reviewers. Its full output is included in the final report under an "Explanations" section. Useful for providing human-readable guides or high-level summaries.
+
+#### Advanced Logical Filtering
+
+Filters normally operate as a logical **AND** (a file must match the path filters AND the regex filters, etc.). For more complex logic, you can use `any` (OR) and `all` (AND) blocks, which can be nested arbitrarily:
+
+- **any**: The filter matches if *any* of its sub-filters match.
+- **all**: The filter matches only if *all* of its sub-filters match.
+
+Existing flat filters (like `path_filters` and `regex_filters` defined at the top level) continue to work as an implicit `all` block for backward compatibility.
 
 ### Primers
 

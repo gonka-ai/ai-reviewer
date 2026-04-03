@@ -49,6 +49,9 @@ type FilterSet struct {
 	FunctionFilters   []string         `yaml:"function_filters"`
 	LineNumberFilters []LineRange      `yaml:"line_numbers_filter"`
 	DateFilter        string           `yaml:"date_filter"`
+
+	Any []FilterSet `yaml:"any,omitempty"`
+	All []FilterSet `yaml:"all,omitempty"`
 }
 
 type MatchOptions struct {
@@ -61,6 +64,24 @@ type MatchOptions struct {
 }
 
 func (fs *FilterSet) Matches(opts MatchOptions) bool {
+	if len(fs.Any) > 0 {
+		for _, sub := range fs.Any {
+			if sub.Matches(opts) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(fs.All) > 0 {
+		for _, sub := range fs.All {
+			if !sub.Matches(opts) {
+				return false
+			}
+		}
+		return true
+	}
+
 	if !fs.MatchesPath(opts.Filename) {
 		return false
 	}
@@ -438,14 +459,31 @@ func GetBranchesInfo(repo, base, head string) (*PRInfo, error) {
 	}, nil
 }
 
+func (fs *FilterSet) Compile() error {
+	for _, r := range fs.RawRegexFilters {
+		re, err := regexp.Compile(r)
+		if err != nil {
+			return fmt.Errorf("invalid regex %s: %w", r, err)
+		}
+		fs.RegexFilters = append(fs.RegexFilters, re)
+	}
+	for i := range fs.Any {
+		if err := fs.Any[i].Compile(); err != nil {
+			return err
+		}
+	}
+	for i := range fs.All {
+		if err := fs.All[i].Compile(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func GetPRContext(prInfo *PRInfo, fs *FilterSet) (*PRContext, error) {
 	if fs != nil {
-		for _, r := range fs.RawRegexFilters {
-			re, err := regexp.Compile(r)
-			if err != nil {
-				return nil, fmt.Errorf("invalid regex %s: %w", r, err)
-			}
-			fs.RegexFilters = append(fs.RegexFilters, re)
+		if err := fs.Compile(); err != nil {
+			return nil, err
 		}
 	}
 
@@ -552,6 +590,24 @@ func GetPRContext(prInfo *PRInfo, fs *FilterSet) (*PRContext, error) {
 }
 
 func (fs *FilterSet) MatchesPath(path string) bool {
+	if len(fs.Any) > 0 {
+		for _, sub := range fs.Any {
+			if sub.MatchesPath(path) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(fs.All) > 0 {
+		for _, sub := range fs.All {
+			if !sub.MatchesPath(path) {
+				return false
+			}
+		}
+		return true
+	}
+
 	if !pathIncluded(path, fs.IncludeFilters) {
 		return false
 	}
