@@ -1,7 +1,7 @@
 ---
 id: chain_security
 model_category: best_code
-path_filters: ["./inference-chain/**/*.go"]
+path_filters: ["./inference-chain/**/*.go", "./subnet/**/*.go"]
 exclude_filters: ["**/*_test.go", "**/*.pb.go", "**/*.pulsar.go", "inference-chain/testutil/**"]
 ---
 
