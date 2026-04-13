@@ -1,7 +1,5 @@
 package main
 
-import ()
-
 type Primer struct {
 	ID       string    `yaml:"id"`
 	AIReview string    `yaml:"ai_review"`
@@ -17,7 +15,7 @@ type PrimerMatch struct {
 
 func LoadPrimers(searchPaths []string, repo string, headSHA string, oh *OutputHandler) ([]Primer, error) {
 	scanner := NewScanner(searchPaths, repo, headSHA, oh)
-	results, err := scanner.Load("primer", func() interface{} { return &Primer{} })
+	results, err := scanner.Load("primer", func() any { return &Primer{} })
 	if err != nil && len(results) == 0 {
 		return nil, err
 	}

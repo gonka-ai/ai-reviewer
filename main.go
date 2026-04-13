@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +33,11 @@ func main() {
 	}
 
 	if s.DryRun {
+		return
+	}
+
+	if s.ContextEval {
+		runContextEval(ctx, runConfig, s)
 		return
 	}
 
@@ -119,6 +127,134 @@ func runPersonas(ctx context.Context, personas []PersonaRun, rc *RunConfig, rr *
 		}(run)
 	}
 	wg.Wait()
+}
+
+func runContextEval(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
+	runResults := NewRunResults()
+	runResults.SetDiffStats(runConfig.GlobalContext)
+
+	concurrency := s.Concurrency
+	sem := make(chan struct{}, concurrency)
+
+	// 1. Run Pre-run Explainers (needed for accuracy as per requirement)
+	runPersonas(ctx, runConfig.PreRunToRun, runConfig, runResults, sem, "pre-run explainers")
+
+	runConfig.OutputHandler.Println("--- Evaluating context windows...")
+
+	allPersonas := append([]PersonaRun{}, runConfig.ReviewersToRun...)
+	allPersonas = append(allPersonas, runConfig.PostRunToRun...)
+
+	profile := runConfig.Config.ModelProfiles[runConfig.ActiveProfile]
+
+	type csvRow struct {
+		persona     string
+		category    string
+		subcategory string
+		model       string
+		chars       int
+		tokens      int
+		cost        float64
+	}
+	var csvRows []csvRow
+
+	for _, pr := range allPersonas {
+		modelCfg, ok := profile[pr.Persona.ModelCategory]
+		modelName := ""
+		inputPrice := 0.0
+		if ok {
+			modelName = modelCfg.Model
+			if modelCfg.ReasoningLevel != "" && modelCfg.ReasoningLevel != "none" {
+				modelName = fmt.Sprintf("%s(%s)", modelName, modelCfg.ReasoningLevel)
+			}
+			inputPrice = modelCfg.InputPricePerMillion
+		}
+
+		pb := &PromptBuilder{
+			Persona:            pr.Persona,
+			PRContext:          pr.Context,
+			GlobalInstructions: runConfig.Config.GlobalInstructions,
+			PreRunAnalyses:     runResults.PreRunAnalyses,
+			Summary:            "", // No summary yet
+			MatchedPrimers:     runConfig.FindMatches(pr.Context),
+			PrimerTypes:        runConfig.Config.PrimerTypes,
+			Model:              modelName,
+		}
+		_, breakdown := pb.Build()
+
+		runConfig.OutputHandler.Printf("\nPersona: %s (%s)\n", pr.Persona.ColoredID, modelName)
+
+		// Group by category for console output
+		type catStats struct {
+			chars  int
+			tokens int
+		}
+		categories := make(map[string]catStats)
+
+		for _, entry := range breakdown.Entries {
+			csvRows = append(csvRows, csvRow{
+				persona:     pr.Persona.ID,
+				category:    entry.Category,
+				subcategory: entry.Subcategory,
+				model:       modelName,
+				chars:       entry.Chars,
+				tokens:      entry.Tokens,
+				cost:        (float64(entry.Tokens) * inputPrice) / 1000000.0,
+			})
+
+			stats := categories[entry.Category]
+			stats.chars += entry.Chars
+			stats.tokens += entry.Tokens
+			categories[entry.Category] = stats
+		}
+
+		orderedCats := []string{"instructions", "global_instructions", "findings", "primers", "metadata", "file_list", "pre_explainer", "diff", "system_prompt"}
+		for _, cat := range orderedCats {
+			if stats, ok := categories[cat]; ok {
+				label := strings.ReplaceAll(cat, "_", " ")
+				// Capitalize first letter of label
+				if len(label) > 0 {
+					label = strings.ToUpper(label[:1]) + label[1:]
+				}
+				runConfig.OutputHandler.Printf("  %s: %d tokens (%d chars)\n", label, stats.tokens, stats.chars)
+			}
+		}
+		runConfig.OutputHandler.Printf("  Total: %d tokens (%d chars)\n", breakdown.TotalTokens, breakdown.TotalChars)
+	}
+
+	if s.ContextEvalCSV != "" {
+		f, err := os.Create(s.ContextEvalCSV)
+		if err != nil {
+			runConfig.OutputHandler.Printf("Error creating CSV file: %v\n", err)
+			return
+		}
+		defer f.Close()
+
+		writer := csv.NewWriter(f)
+		defer writer.Flush()
+
+		writer.Write([]string{"tokens", "chars", "cost", "model", "persona", "category", "label", "path"})
+		writer.Write([]string{"Integer", "Integer", "Float", "String", "String", "String", "String", "StringPath"})
+		for _, row := range csvRows {
+			parts := []string{row.category}
+			if row.subcategory != "" {
+				subparts := strings.Split(row.subcategory, "/")
+				parts = append(parts, subparts...)
+			}
+			path := strings.Join(parts, ",")
+			label := parts[len(parts)-1]
+			writer.Write([]string{
+				strconv.Itoa(row.tokens),
+				strconv.Itoa(row.chars),
+				fmt.Sprintf("%.6f", row.cost),
+				row.model,
+				row.persona,
+				row.category,
+				label,
+				path,
+			})
+		}
+		runConfig.OutputHandler.Printf("\nContext evaluation saved to %s\n", s.ContextEvalCSV)
+	}
 }
 
 func checkDependencies() error {

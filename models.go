@@ -91,6 +91,10 @@ func (c *OpenAIClient) GenerateJSON(ctx context.Context, prompt string, maxToken
 }
 
 func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens int, jsonMode bool) (ModelResult, error) {
+	modelDisplay := c.model
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		modelDisplay = fmt.Sprintf("%s(%s)", c.model, c.reasoningLevel)
+	}
 	req := openai.ChatCompletionRequest{
 		Model: c.model,
 		Messages: []openai.ChatCompletionMessage{
@@ -131,7 +135,7 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 		TokensOut:       tokensOut,
 		TokensReasoning: tokensReasoning,
 		Provider:        "openai",
-		Model:           c.model,
+		Model:           modelDisplay,
 		FinishReason:    string(resp.Choices[0].FinishReason),
 	}, nil
 }
@@ -167,6 +171,10 @@ func (c *AnthropicClient) GenerateJSON(ctx context.Context, prompt string, maxTo
 }
 
 func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens int, jsonMode bool) (ModelResult, error) {
+	modelDisplay := c.model
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		modelDisplay = fmt.Sprintf("%s(%s)", c.model, c.reasoningLevel)
+	}
 	params := anthropic.MessageNewParams{
 		Model: anthropic.Model(c.model),
 		Messages: []anthropic.MessageParam{
@@ -239,7 +247,7 @@ func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens
 		TokensOut:       int(outputTokens),
 		TokensReasoning: tokensReasoning,
 		Provider:        "anthropic",
-		Model:           c.model,
+		Model:           modelDisplay,
 		FinishReason:    stopReason,
 	}, nil
 }
@@ -275,6 +283,10 @@ func (c *GeminiClient) GenerateJSON(ctx context.Context, prompt string, maxToken
 }
 
 func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens int, jsonMode bool) (ModelResult, error) {
+	modelDisplay := c.model
+	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+		modelDisplay = fmt.Sprintf("%s(%s)", c.model, c.reasoningLevel)
+	}
 	config := &genai.GenerateContentConfig{}
 	if jsonMode {
 		config.ResponseMIMEType = "application/json"
@@ -340,7 +352,7 @@ func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens in
 		TokensOut:       tokensOut,
 		TokensReasoning: tokensReasoning,
 		Provider:        "gemini",
-		Model:           c.model,
+		Model:           modelDisplay,
 		FinishReason:    finishReason,
 	}, nil
 }

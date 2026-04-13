@@ -16,7 +16,7 @@ type ScanTarget struct {
 	ID           string
 	AIReview     string
 	Instructions string
-	Raw          interface{} // Pointer to Persona or Primer
+	Raw          any // Pointer to Persona or Primer
 }
 
 type Scanner struct {
@@ -35,7 +35,7 @@ func NewScanner(searchPaths []string, repo string, headSHA string, oh *OutputHan
 	}
 }
 
-func (s *Scanner) Load(expectedType string, targetFactory func() interface{}) ([]ScanTarget, error) {
+func (s *Scanner) Load(expectedType string, targetFactory func() any) ([]ScanTarget, error) {
 	resultsMap := make(map[string]ScanTarget)
 	var loadErrs []error
 
@@ -74,7 +74,7 @@ func (s *Scanner) Load(expectedType string, targetFactory func() interface{}) ([
 	return final, errors.Join(loadErrs...)
 }
 
-func (s *Scanner) scanFiles(paths []string, isDedicated bool, expectedType string, targetFactory func() interface{}) ([]ScanTarget, error) {
+func (s *Scanner) scanFiles(paths []string, isDedicated bool, expectedType string, targetFactory func() any) ([]ScanTarget, error) {
 	var results []ScanTarget
 	seenIDs := make(map[string]bool)
 	var scanErrs []error
@@ -130,7 +130,7 @@ func (s *Scanner) scanFiles(paths []string, isDedicated bool, expectedType strin
 	return results, errors.Join(scanErrs...)
 }
 
-func (s *Scanner) scanRepo(headSHA string, expectedType string, targetFactory func() interface{}) ([]ScanTarget, error) {
+func (s *Scanner) scanRepo(headSHA string, expectedType string, targetFactory func() any) ([]ScanTarget, error) {
 	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", headSHA)
 	out, err := cmd.Output()
 	if err != nil {
@@ -173,7 +173,7 @@ func (s *Scanner) scanRepo(headSHA string, expectedType string, targetFactory fu
 	return results, errors.Join(scanErrs...)
 }
 
-func (s *Scanner) processFile(path string, content []byte, expectedType string, isDedicated bool, targetFactory func() interface{}) (*ScanTarget, bool, error) {
+func (s *Scanner) processFile(path string, content []byte, expectedType string, isDedicated bool, targetFactory func() any) (*ScanTarget, bool, error) {
 	// Lightweight check for ai_review tag if not in a dedicated directory
 	if !isDedicated {
 		if !bytes.Contains(content, []byte("ai_review:")) {
@@ -220,7 +220,7 @@ func (s *Scanner) isRepoDedicated(path string, expectedType string) bool {
 	return strings.HasPrefix(path, dedicated1) || strings.HasPrefix(path, dedicated2)
 }
 
-func getAIReviewAndID(target interface{}, path string) (string, string) {
+func getAIReviewAndID(target any, path string) (string, string) {
 	switch v := target.(type) {
 	case *Persona:
 		return v.AIReview, v.ID
@@ -232,7 +232,7 @@ func getAIReviewAndID(target interface{}, path string) (string, string) {
 	return "", ""
 }
 
-func setID(target interface{}, id string) {
+func setID(target any, id string) {
 	switch v := target.(type) {
 	case *Persona:
 		v.ID = id

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/karagenc/go-pathspec"
+	"github.com/pkoukk/tiktoken-go"
 )
 
 type PRInfo struct {
@@ -747,15 +748,136 @@ func (fs *FilterSet) GetChangedFiles(baseSHA, headSHA string) ([]string, error) 
 	return files, nil
 }
 
-func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAnalyses map[string][]string, summary string, matchedPrimers []PrimerMatch, primerTypes map[string]PrimerType) string {
-	var fileList strings.Builder
+type PromptBuilder struct {
+	Persona            Persona
+	PRContext          *PRContext
+	GlobalInstructions string
+	PreRunAnalyses     map[string][]string
+	Summary            string
+	MatchedPrimers     []PrimerMatch
+	PrimerTypes        map[string]PrimerType
+	Model              string
+}
+
+type BreakdownEntry struct {
+	Category    string
+	Subcategory string
+	Content     string
+	Chars       int
+	Tokens      int
+}
+
+type PromptBreakdown struct {
+	Entries     []BreakdownEntry
+	TotalChars  int
+	TotalTokens int
+}
+
+func (pb *PromptBuilder) CountTokens(text string) int {
+	if pb.Model == "" {
+		return len(text) / 4 // Rough estimate if no model
+	}
+
+	encoding := "cl100k_base"
+	model := pb.Model
+	if idx := strings.Index(model, "("); idx != -1 {
+		model = model[:idx]
+	}
+	tke, err := tiktoken.EncodingForModel(model)
+	if err != nil {
+		// Fallback to cl100k_base which is common for many modern models
+		tke, err = tiktoken.GetEncoding(encoding)
+		if err != nil {
+			return len(text) / 4
+		}
+	}
+
+	token := tke.Encode(text, nil, nil)
+	return len(token)
+}
+
+func (pb *PromptBuilder) Build() (string, PromptBreakdown) {
+	p := pb.Persona
+	ctx := pb.PRContext
+	preRunAnalyses := pb.PreRunAnalyses
+	summary := pb.Summary
+	matchedPrimers := pb.MatchedPrimers
+	primerTypes := pb.PrimerTypes
+
+	var breakdown PromptBreakdown
+
+	addEntry := func(category, subcategory, content string) {
+		if content == "" {
+			return
+		}
+		chars := len(content)
+		tokens := pb.CountTokens(content)
+		breakdown.Entries = append(breakdown.Entries, BreakdownEntry{
+			Category:    category,
+			Subcategory: subcategory,
+			Content:     content,
+			Chars:       chars,
+			Tokens:      tokens,
+		})
+		breakdown.TotalChars += chars
+		breakdown.TotalTokens += tokens
+	}
+
+	// Persona Instructions
+	personaInstText := fmt.Sprintf("# PERSONA INSTRUCTIONS\n%s\n", p.Instructions)
+	addEntry("instructions", "", personaInstText)
+
+	// Findings
+	if p.IncludeFindings && summary != "" {
+		findingsText := fmt.Sprintf("\n---\n# AGGREGATED REPORT\n%s\n", summary)
+		addEntry("findings", "", findingsText)
+	}
+
+	// Primers
+	if len(matchedPrimers) > 0 {
+		for _, pm := range matchedPrimers {
+			typeName := pm.Primer.Type
+			typeDesc := ""
+			if pt, ok := primerTypes[typeName]; ok {
+				typeDesc = pt.Description
+			}
+
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("\n---\n# PRIMER: %s (Type: %s)\n", pm.Primer.ID, typeName))
+			if typeDesc != "" {
+				sb.WriteString(fmt.Sprintf("**Type Intent:** %s\n\n", typeDesc))
+			}
+			sb.WriteString(fmt.Sprintf("**Applies to:**\n\n- %s", strings.Join(pm.Files, "\n- ")))
+			sb.WriteString("\n### Content:\n")
+			sb.WriteString(pm.Primer.Content)
+			sb.WriteString("\n\n")
+
+			addEntry("primers", pm.Primer.ID, sb.String())
+		}
+	}
+
+	// PR Metadata
+	metadata := fmt.Sprintf(`
+---
+# PR METADATA
+## Title
+%s
+
+## Description
+%s
+`, ctx.Title, ctx.Description)
+	addEntry("metadata", "", metadata)
+
+	// File List and Pre-run Analyses
+	var fileListSB strings.Builder
+	fileListSB.WriteString("\n---\n# CHANGED FILES\n")
 	for _, file := range ctx.ChangedFiles() {
-		fileList.WriteString(fmt.Sprintf("- %s", file))
+		fileLine := fmt.Sprintf("- %s\n", file)
+		fileListSB.WriteString(fileLine)
+
 		if len(p.IncludeExplainers) > 0 {
 			if analyses, ok := preRunAnalyses[file]; ok {
 				for _, analysis := range analyses {
-					// Check if this analysis is from one of the included explainers
-					// Analysis format is "PersonaID: description" (based on pipeline.go and how preRunAnalyses is populated)
 					parts := strings.SplitN(analysis, ": ", 2)
 					if len(parts) > 0 {
 						explainerID := parts[0]
@@ -767,54 +889,24 @@ func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAna
 							}
 						}
 						if included {
-							fileList.WriteString(fmt.Sprintf("\n  - Explainer Analysis: %s", analysis))
+							analysisLine := fmt.Sprintf("  - Explainer Analysis: %s\n", analysis)
+							addEntry("pre_explainer", file, analysisLine)
 						}
 					}
 				}
 			}
 		}
-		fileList.WriteString("\n")
 	}
+	addEntry("file_list", "", fileListSB.String())
 
-	findingsText := ""
-	if p.IncludeFindings && summary != "" {
-		findingsText = fmt.Sprintf("\n---\n# AGGREGATED REPORT\n%s\n", summary)
-	}
-
-	primersSection := ""
-	if len(matchedPrimers) > 0 {
-		var sb strings.Builder
-		sb.WriteString("\n---\n# PRIMERS\n")
-		sb.WriteString("The following primers apply to certain files being analyzed. Primers provide extra context, constraints, or blueprints for specific types of changes.\n\n")
-		for _, pm := range matchedPrimers {
-			typeName := pm.Primer.Type
-			typeDesc := ""
-			if pt, ok := primerTypes[typeName]; ok {
-				typeDesc = pt.Description
-			}
-
-			sb.WriteString(fmt.Sprintf("## Primer: %s (Type: %s)\n", pm.Primer.ID, typeName))
-			if typeDesc != "" {
-				sb.WriteString(fmt.Sprintf("**Type Intent:** %s\n\n", typeDesc))
-			}
-			sb.WriteString(fmt.Sprintf("**Applies to:**\n\n- %s", strings.Join(pm.Files, "\n- ")))
-			sb.WriteString("### Content:\n")
-			sb.WriteString(pm.Primer.Content)
-			sb.WriteString("\n\n")
-		}
-		primersSection = sb.String()
-	}
-
-	diffSection := ""
-	fullDiff := ctx.FullDiff()
+	// Diffs
 	if p.ExcludeDiff {
-		// Calculate diff stats
 		addedLines := 0
 		deletedLines := 0
+		fullDiff := ctx.FullDiff()
 		scanner := bufio.NewScanner(strings.NewReader(fullDiff))
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Extract original diff line (after line number and colon)
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) < 2 {
 				continue
@@ -826,46 +918,52 @@ func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAna
 				deletedLines++
 			}
 		}
-		diffSection = fmt.Sprintf("\n---\n# DIFF STATS\n%d files changed, %d lines added, %d lines deleted. (Full diff excluded by configuration)\n", len(ctx.Files), addedLines, deletedLines)
+		diffStats := fmt.Sprintf("\n---\n# DIFF STATS\n%d files changed, %d lines added, %d lines deleted. (Full diff excluded by configuration)\n", len(ctx.Files), addedLines, deletedLines)
+		addEntry("diff", "", diffStats)
 	} else {
-		fence := "```"
-		diffSection = fmt.Sprintf(`
+		for _, f := range ctx.Files {
+			fence := "```"
+			diffSection := fmt.Sprintf(`
 ---
-# UNIFIED DIFF
-This is a unified diff format where each line is prefixed with a line number (e.g., "123:"). Lines starting with "-" after the line number indicate removed lines, lines starting with "+" after the line number indicate added lines, and lines starting with " " (space) are unchanged context lines. Diff chunks begin with "@@ -old_start,old_count +new_start,new_count @@" headers that may include function/class context, and are preceded by +++ lines indicating the file being modified.
-
+# UNIFIED DIFF: %s
 %sdiff
 %s
 %s
-`, fence, fullDiff, fence)
+`, f.Filename, fence, f.Diff, fence)
+			addEntry("diff", f.Filename, diffSection)
+		}
 	}
 
-	prompt := fmt.Sprintf(`# PERSONA INSTRUCTIONS
-%s
-%s
-%s
-
----
-# PR METADATA
-## Title
-%s
-
-## Description
-%s
-
----
-# CHANGED FILES
-%s
-%s
-`, p.Instructions, findingsText, primersSection, ctx.Title, ctx.Description, fileList.String(), diffSection)
-
-	if globalInstructions != "" {
-		prompt += fmt.Sprintf("\n---\n# STANDARD INSTRUCTIONS\n%s\n", globalInstructions)
+	// Global Instructions
+	if pb.GlobalInstructions != "" {
+		globalInstText := fmt.Sprintf("\n---\n# STANDARD INSTRUCTIONS\n%s\n", pb.GlobalInstructions)
+		addEntry("global_instructions", "", globalInstText)
 	}
 
+	// System Prompt (only for pre-run explainers)
 	if p.Role == "explainer" && p.Stage == "pre" {
-		prompt = PreRunExplainerSystemPrompt + "\n\n" + prompt
+		addEntry("system_prompt", "", PreRunExplainerSystemPrompt+"\n\n")
 	}
 
+	// Assemble final prompt from entries
+	var promptSB strings.Builder
+	for _, entry := range breakdown.Entries {
+		promptSB.WriteString(entry.Content)
+	}
+
+	return promptSB.String(), breakdown
+}
+
+func buildPrompt(p Persona, ctx *PRContext, globalInstructions string, preRunAnalyses map[string][]string, summary string, matchedPrimers []PrimerMatch, primerTypes map[string]PrimerType) string {
+	pb := &PromptBuilder{
+		Persona:            p,
+		PRContext:          ctx,
+		GlobalInstructions: globalInstructions,
+		PreRunAnalyses:     preRunAnalyses,
+		Summary:            summary,
+		MatchedPrimers:     matchedPrimers,
+		PrimerTypes:        primerTypes,
+	}
+	prompt, _ := pb.Build()
 	return prompt
 }

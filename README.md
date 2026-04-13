@@ -34,6 +34,8 @@ go build -o ai-review
 - `--max-tokens <n>`: Override the maximum tokens for AI responses.
 - `--concurrency <n>`: Set the maximum number of personas to run concurrently (default: 5).
 - `--dry-run`: Scan and report what personas and primers will be applied, but do not execute any AI calls. Useful for testing configuration and filtering logic without incurring costs.
+- `--context-eval`: Perform a detailed evaluation of the context window size for each persona. This runs pre-run explainers, calculates accurate token counts using `tiktoken`, and reports a breakdown of context components (persona instructions, primers, diffs, etc.) without executing the actual review personas.
+- `--context-eval-csv <file>`: In addition to the console report, output the context evaluation data to a CSV file. This is designed for TreeMap visualizations, with a hierarchical `path` column (e.g., `"persona,category,subcategory"`).
 
 ### Examples:
 ```bash
@@ -54,6 +56,12 @@ go build -o ai-review
 
 # Dry run to see what would be executed for PR #1234
 ./ai-review pr google/go-github 1234 --dry-run
+
+# Evaluate context window sizes for PR #1234
+./ai-review pr google/go-github 1234 --context-eval
+
+# Export context evaluation to CSV for visualization
+./ai-review pr google/go-github 1234 --context-eval --context-eval-csv evaluation.csv
 ```
 
 ## Setup
@@ -281,3 +289,29 @@ The final report includes a "Stats" section with:
 - Estimated cost per step based on prices in `config.yaml`.
 - Total estimated cost for the run.
 - Usage summary grouped by model.
+
+## Context Evaluation
+
+The `--context-eval` flag allows you to analyze and optimize the context being sent to each AI persona without performing a full review. This is crucial for staying within model token limits and understanding which parts of your prompt are consuming the most space.
+
+### How it works:
+1. **Runs Pre-Run Explainers**: Since explainers provide context for subsequent reviewers, they are executed to get their actual output.
+2. **Builds Full Prompts**: The tool constructs the exact prompt that would be sent to each persona, including persona instructions, matched primers, explainer outputs, and file diffs.
+3. **Token Counting**: Uses `tiktoken` with the correct encoding for the selected model to provide accurate token counts.
+4. **Breakdown Report**: Generates a detailed breakdown for each persona:
+    - **Persona**: The base instructions for the persona.
+    - **Primers**: Breakdown of tokens for each matched primer.
+    - **Explainers**: Tokens from pre-run explainer analysis.
+    - **Diffs**: Breakdown of tokens for each file's diff.
+    - **Other**: Primers, instructions, and other metadata.
+
+### Visualization with CSV:
+Using `--context-eval-csv <filename.csv>` generates a flat data file suitable for TreeMap visualizations (like those in Excel or specialized tools). Each row includes:
+- **Tokens**: Accurate token count for that specific component.
+- **Chars**: Character count for that component.
+- **Cost**: Estimated cost for that specific component (PPM tokens estimate).
+- **Model**: The model used for this calculation (e.g., `gpt-4o(high)`).
+- **Persona**: The ID of the persona.
+- **Category**: The context category (e.g., `diff`, `primers`).
+- **Label**: The deepest level of the hierarchical path (e.g., filename, primer ID, or category).
+- **Path**: A hierarchical identifier using commas as separators, double-quoted: `"persona,category,subcategory,filename"` (e.g., `"security,diff,src,main.go"`).

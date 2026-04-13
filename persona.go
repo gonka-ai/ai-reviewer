@@ -31,7 +31,7 @@ type PersonaRun struct {
 
 func LoadPersonas(searchPaths []string, repo string, headSHA string, oh *OutputHandler) ([]Persona, error) {
 	scanner := NewScanner(searchPaths, repo, headSHA, oh)
-	results, err := scanner.Load("persona", func() interface{} { return &Persona{} })
+	results, err := scanner.Load("persona", func() any { return &Persona{} })
 	if err != nil && len(results) == 0 {
 		return nil, err
 	}

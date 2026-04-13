@@ -2,7 +2,7 @@
 id: pr_description
 role: explainer
 stage: post
-model_category: best_code
+model_category: balanced
 exclude_filters: ["**/*.pb.go", "**/*.pulsar.go"]
 include_explainers: ["state-modified", "change-complexity"]
 ---

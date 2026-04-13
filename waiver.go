@@ -33,7 +33,7 @@ type WaiverEvaluation struct {
 
 func LoadWaivers(searchPaths []string, repo string, headSHA string, oh *OutputHandler) ([]Waiver, error) {
 	scanner := NewScanner(searchPaths, repo, headSHA, oh)
-	results, err := scanner.Load("waiver", func() interface{} { return &Waiver{} })
+	results, err := scanner.Load("waiver", func() any { return &Waiver{} })
 	if err != nil && len(results) == 0 {
 		return nil, err
 	}

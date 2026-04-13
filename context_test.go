@@ -529,3 +529,77 @@ func TestParseAnnotatedFileDiff(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptBuilder_Build(t *testing.T) {
+	p := Persona{
+		ID:           "test-persona",
+		Instructions: "Test instructions",
+	}
+	ctx := &PRContext{
+		Title:       "Test PR",
+		Description: "Test description",
+		Files: []FileContext{
+			{
+				Filename: "main.go",
+				Diff:     "+++ b/main.go\n10:+func main() {}\n",
+			},
+		},
+	}
+	pb := &PromptBuilder{
+		Persona:            p,
+		PRContext:          ctx,
+		GlobalInstructions: "Global instructions",
+	}
+
+	prompt, breakdown := pb.Build()
+
+	if breakdown.TotalChars != len(prompt) {
+		t.Errorf("breakdown.TotalChars = %d, want %d", breakdown.TotalChars, len(prompt))
+	}
+
+	foundInstructions := false
+	foundGlobalInstructions := false
+	foundMetadata := false
+	foundFileList := false
+	foundDiff := false
+
+	for _, entry := range breakdown.Entries {
+		switch entry.Category {
+		case "instructions":
+			foundInstructions = true
+		case "global_instructions":
+			foundGlobalInstructions = true
+		case "metadata":
+			foundMetadata = true
+		case "file_list":
+			foundFileList = true
+		case "diff":
+			foundDiff = true
+		}
+	}
+
+	if !foundInstructions {
+		t.Errorf("Category 'instructions' not found in breakdown")
+	}
+	if !foundGlobalInstructions {
+		t.Errorf("Category 'global_instructions' not found in breakdown")
+	}
+	if !foundMetadata {
+		t.Errorf("Category 'metadata' not found in breakdown")
+	}
+	if !foundFileList {
+		t.Errorf("Category 'file_list' not found in breakdown")
+	}
+	if !foundDiff {
+		t.Errorf("Category 'diff' not found in breakdown")
+	}
+
+	// Verify diff subcategory is filename
+	for _, entry := range breakdown.Entries {
+		if entry.Category == "diff" {
+			if entry.Subcategory != "main.go" {
+				t.Errorf("diff subcategory = %q, want %q", entry.Subcategory, "main.go")
+			}
+		}
+	}
+}

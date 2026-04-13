@@ -204,27 +204,29 @@ func (h *OutputHandler) StripMarkers(s string) string {
 	return re.ReplaceAllString(s, "$1")
 }
 
-func (h *OutputHandler) Printf(format string, a ...interface{}) {
+func (h *OutputHandler) Printf(format string, a ...any) {
 	fmt.Printf(format, a...)
 }
 
-func (h *OutputHandler) Println(a ...interface{}) {
+func (h *OutputHandler) Println(a ...any) {
 	fmt.Println(a...)
 }
 
 type RunSettings struct {
-	Command      string
-	Repo         string
-	PRNumber     string
-	CommitHash   string
-	CompareTo    string
-	FilePatterns []string
-	MaxTokens    *int
-	Concurrency  int
-	ModelProfile string
-	InitialCwd   string
-	ExeDir       string
-	DryRun       bool
+	Command        string
+	Repo           string
+	PRNumber       string
+	CommitHash     string
+	CompareTo      string
+	FilePatterns   []string
+	MaxTokens      *int
+	Concurrency    int
+	ModelProfile   string
+	InitialCwd     string
+	ExeDir         string
+	DryRun         bool
+	ContextEval    bool
+	ContextEvalCSV string
 }
 
 type RunConfig struct {
@@ -543,6 +545,25 @@ func (rc *RunConfig) getAggregationModelConfig() (ModelConfig, error) {
 	return ModelConfig{}, fmt.Errorf("'balanced' model mapping not found in profile '%s'", rc.ActiveProfile)
 }
 
+func (rc *RunConfig) getModelInfo(p Persona) string {
+	profile, ok := rc.Config.ModelProfiles[rc.ActiveProfile]
+	if !ok {
+		return "unknown profile"
+	}
+	modelCfg, ok := profile[p.ModelCategory]
+	if !ok {
+		return fmt.Sprintf("no mapping for %s", p.ModelCategory)
+	}
+	res := modelCfg.Model
+	if res == "" {
+		res = modelCfg.ID
+	}
+	if modelCfg.ReasoningLevel != "" && modelCfg.ReasoningLevel != "none" {
+		res = fmt.Sprintf("%s (%s)", res, modelCfg.ReasoningLevel)
+	}
+	return res
+}
+
 func (rc *RunConfig) filterPersonas() {
 	rc.OutputHandler.Println("--- Filtering personas...")
 	for _, p := range rc.Personas {
@@ -607,28 +628,28 @@ func (rc *RunConfig) filterPersonas() {
 
 	rc.OutputHandler.Println("    To be run:")
 	for _, r := range rc.PreRunToRun {
-		rc.OutputHandler.Printf("      - %s (explainer, pre)\n", r.Persona.ColoredID)
+		rc.OutputHandler.Printf("      - %s (explainer, pre) [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		rc.printMatchedPrimers(r.Context)
 	}
 	for _, r := range rc.ReviewersToRun {
-		rc.OutputHandler.Printf("      - %s (reviewer)\n", r.Persona.ColoredID)
+		rc.OutputHandler.Printf("      - %s (reviewer) [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		rc.printMatchedPrimers(r.Context)
 	}
 	for _, r := range rc.PostRunToRun {
-		rc.OutputHandler.Printf("      - %s (explainer, post)\n", r.Persona.ColoredID)
+		rc.OutputHandler.Printf("      - %s (explainer, post) [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		rc.printMatchedPrimers(r.Context)
 	}
 
 	if len(rc.PreRunToSkip) > 0 || len(rc.ReviewersToSkip) > 0 || len(rc.PostRunToSkip) > 0 {
 		rc.OutputHandler.Println("    To be skipped (no matching files):")
 		for _, r := range rc.PreRunToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
+			rc.OutputHandler.Printf("      - %s [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		}
 		for _, r := range rc.ReviewersToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
+			rc.OutputHandler.Printf("      - %s [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		}
 		for _, r := range rc.PostRunToSkip {
-			rc.OutputHandler.Printf("      - %s\n", r.Persona.ColoredID)
+			rc.OutputHandler.Printf("      - %s [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		}
 	}
 }
@@ -646,6 +667,8 @@ func (s *RunSettings) parsePRArgs(args []string) {
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
+	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
+	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -655,6 +678,8 @@ func (s *RunSettings) parsePRArgs(args []string) {
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
+	s.ContextEval = *contextEval
+	s.ContextEvalCSV = *contextEvalCSV
 
 	if len(remaining) < 2 {
 		s.PrintUsage()
@@ -671,6 +696,8 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	compareTo := fs.String("compare-to", "", "Specific commit to compare to (default: parent)")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
+	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
+	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -681,6 +708,8 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	s.ModelProfile = *modelProfile
 	s.CompareTo = *compareTo
 	s.DryRun = *dryRun
+	s.ContextEval = *contextEval
+	s.ContextEvalCSV = *contextEvalCSV
 
 	if len(remaining) < 2 {
 		s.PrintUsage()
@@ -696,6 +725,8 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
+	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
+	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -705,6 +736,8 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
+	s.ContextEval = *contextEval
+	s.ContextEvalCSV = *contextEvalCSV
 
 	if len(remaining) < 3 {
 		s.PrintUsage()
@@ -721,6 +754,8 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
+	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
+	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -730,6 +765,8 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
+	s.ContextEval = *contextEval
+	s.ContextEvalCSV = *contextEvalCSV
 
 	if len(remaining) < 3 {
 		s.PrintUsage()
@@ -742,10 +779,10 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 
 func (s *RunSettings) PrintUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
-	fmt.Println("  ai-reviewer branches <repo> <base> <head> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run]")
+	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
+	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
+	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
+	fmt.Println("  ai-reviewer branches <repo> <base> <head> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
 }
 
 func (s *RunSettings) TargetID() string {
