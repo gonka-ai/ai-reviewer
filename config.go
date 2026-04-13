@@ -23,7 +23,7 @@ type ModelConfig struct {
 	ID                    string  `yaml:"id,omitempty"`
 	Provider              string  `yaml:"provider"`
 	Model                 string  `yaml:"model"`
-	MaxTokens             int     `yaml:"max_tokens"`
+	MaxTokens             *int    `yaml:"max_tokens"`
 	ReasoningLevel        string  `yaml:"reasoning_level,omitempty"` // none | low | medium | high
 	InputPricePerMillion  float64 `yaml:"input_price_per_million"`
 	OutputPricePerMillion float64 `yaml:"output_price_per_million"`
@@ -127,7 +127,7 @@ func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, 
 						if v.Model == "" {
 							v.Model = def.Model
 						}
-						if v.MaxTokens == 0 {
+						if v.MaxTokens == nil {
 							v.MaxTokens = def.MaxTokens
 						}
 						if v.ReasoningLevel == "" {

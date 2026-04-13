@@ -14,7 +14,7 @@ type Persona struct {
 	AIReview          string `yaml:"ai_review"`
 	ColoredID         string
 	ModelCategory     string    `yaml:"model_category"`
-	MaxTokens         int       `yaml:"max_tokens"`
+	MaxTokens         *int      `yaml:"max_tokens"`
 	Filters           FilterSet `yaml:",inline"`
 	Role              string    `yaml:"role"`  // reviewer (default) | explainer
 	Stage             string    `yaml:"stage"` // pre | post
@@ -40,7 +40,7 @@ func LoadPersonas(searchPaths []string, repo string, headSHA string, oh *OutputH
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no personas found in any of the search paths")
+		return nil, nil // No personas found is okay
 	}
 
 	var personas []Persona
@@ -73,12 +73,15 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		return "", ModelResult{}, 0, nil, fmt.Errorf("error creating client: %w", err)
 	}
 
-	maxTokens := modelCfg.MaxTokens
-	if p.MaxTokens > 0 {
-		maxTokens = p.MaxTokens
+	maxTokens := 0
+	if modelCfg.MaxTokens != nil {
+		maxTokens = *modelCfg.MaxTokens
 	}
-	if rc.Settings.MaxTokens > 0 {
-		maxTokens = rc.Settings.MaxTokens
+	if p.MaxTokens != nil {
+		maxTokens = *p.MaxTokens
+	}
+	if rc.Settings.MaxTokens != nil {
+		maxTokens = *rc.Settings.MaxTokens
 	}
 
 	var preRunAnalyses map[string][]string

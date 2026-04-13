@@ -219,7 +219,7 @@ type RunSettings struct {
 	CommitHash   string
 	CompareTo    string
 	FilePatterns []string
-	MaxTokens    int
+	MaxTokens    *int
 	Concurrency  int
 	ModelProfile string
 	InitialCwd   string
@@ -642,14 +642,16 @@ func (rc *RunConfig) printMatchedPrimers(personaContext *PRContext) {
 
 func (s *RunSettings) parsePRArgs(args []string) {
 	fs := flag.NewFlagSet("pr", flag.ExitOnError)
-	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
+	maxTokens := fs.Int("max-tokens", -1, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
-	s.MaxTokens = *maxTokens
+	if *maxTokens != -1 {
+		s.MaxTokens = maxTokens
+	}
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
@@ -664,7 +666,7 @@ func (s *RunSettings) parsePRArgs(args []string) {
 
 func (s *RunSettings) parseCommitArgs(args []string) {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
-	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
+	maxTokens := fs.Int("max-tokens", -1, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	compareTo := fs.String("compare-to", "", "Specific commit to compare to (default: parent)")
@@ -672,7 +674,9 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 
 	remaining, _ := parseInterspersed(fs, args)
 
-	s.MaxTokens = *maxTokens
+	if *maxTokens != -1 {
+		s.MaxTokens = maxTokens
+	}
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.CompareTo = *compareTo
@@ -688,14 +692,16 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 
 func (s *RunSettings) parseFileArgs(args []string) {
 	fs := flag.NewFlagSet("file", flag.ExitOnError)
-	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
+	maxTokens := fs.Int("max-tokens", -1, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
-	s.MaxTokens = *maxTokens
+	if *maxTokens != -1 {
+		s.MaxTokens = maxTokens
+	}
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun
@@ -711,14 +717,16 @@ func (s *RunSettings) parseFileArgs(args []string) {
 
 func (s *RunSettings) parseBranchesArgs(args []string) {
 	fs := flag.NewFlagSet("branches", flag.ExitOnError)
-	maxTokens := fs.Int("max-tokens", s.MaxTokens, "Override max tokens for AI response")
+	maxTokens := fs.Int("max-tokens", -1, "Override max tokens for AI response")
 	concurrency := fs.Int("concurrency", s.Concurrency, "Max concurrent personas")
 	modelProfile := fs.String("model-profile", s.ModelProfile, "Model profile to use from config.yaml")
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 
 	remaining, _ := parseInterspersed(fs, args)
 
-	s.MaxTokens = *maxTokens
+	if *maxTokens != -1 {
+		s.MaxTokens = maxTokens
+	}
 	s.Concurrency = *concurrency
 	s.ModelProfile = *modelProfile
 	s.DryRun = *dryRun

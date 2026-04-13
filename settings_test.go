@@ -59,7 +59,7 @@ func TestFlagParsing(t *testing.T) {
 			if s.DryRun != tt.wantDryRun {
 				t.Errorf("DryRun = %v, want %v", s.DryRun, tt.wantDryRun)
 			}
-			if tt.wantMaxTokens != 0 && s.MaxTokens != tt.wantMaxTokens {
+			if tt.wantMaxTokens != 0 && (s.MaxTokens == nil || *s.MaxTokens != tt.wantMaxTokens) {
 				t.Errorf("MaxTokens = %v, want %v", s.MaxTokens, tt.wantMaxTokens)
 			}
 		})

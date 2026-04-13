@@ -176,7 +176,9 @@ func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens
 	if maxTokens > 0 {
 		params.MaxTokens = int64(maxTokens)
 	} else {
-		params.MaxTokens = 4096
+		// If 0, it means no limit, but Anthropic REQUIRES max_tokens.
+		// Use 64k tokens
+		params.MaxTokens = 65536
 	}
 
 	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
