@@ -19,6 +19,8 @@ For files that are under "inference-chain", the `inference` module or app (not o
 k.LogError("The log message", types.*, "data", value)
 ```
 
+You can ignore calls to SafeLogSubAccountTransaction or LogSubAccountTransaction, these follow a different pattern.
+
 General logging guidelines:
 1. The log message should be fairly short
 3. Warn and Error should be used sparingly

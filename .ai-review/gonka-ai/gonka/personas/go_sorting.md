@@ -2,7 +2,6 @@
 id: go-sorting-modernization
 role: reviewer
 model_category: balanced
-max_tokens: 1200
 
 # Only run on Go source files
 path_filters:

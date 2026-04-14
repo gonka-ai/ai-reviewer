@@ -12,6 +12,8 @@ ai-review
 # AI Review Artifacts (Logs and Runs)
 .ai-review/**/runs/
 .ai-review/**/run-log.jsonl
+.ai-review/**/cache/**
+token-usage.*
 
 # Test binaries
 *.test

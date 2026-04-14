@@ -17,4 +17,11 @@ Include:
 - Logical grouping of files to make the review process smoother.
 - Any specific things the human should look out for.
 
+Emphasize especially areas that are unlikely to be caught by:
+- Unit tests.
+- Integration tests.
+- Static analysis.
+- AI Powered Code Review.
+- Final e2e tests on a testnet environment.
+
 Keep it concise and actionable for a human reader.

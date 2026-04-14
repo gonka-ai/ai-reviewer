@@ -35,3 +35,5 @@ Look for situations where walking through the collection instead of loading the 
 Also look for removal of data, and see if the data can be removed using Clear() with a ranger vs iterating over a collection and removing each item.
 
 Call out as a critical issue any new code that uses the "old" method of handling data, such as runtime.KVStoreAdapter, instead of using the more modern Cosmos SDK collections api. 
+
+However, x/bls, x/genesistransfer and x/restrictions are exceptions to this rule, they are using the older style using KVStoreAdapter.

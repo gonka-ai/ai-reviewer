@@ -65,7 +65,7 @@ model_profiles:
       reasoning_level: low
     best_code:
       id: gemini_3.1_pro_preview
-      reasoning_level: high
+      reasoning_level: medium
     frontier_best:
       id: gemini_3.1_pro_preview
       reasoning_level: high
@@ -104,7 +104,7 @@ primer_types:
     description: "A particularly important fact about a part of the Gonka network"
 
 global_instructions: |
-  This code is all using Go version 1.25.
+  This code is all using Go version 1.24.2
   The code under ./inference-chain is all Cosmos SDK code for a Layer-1 blockchain.
   Follow these rules for your review:
   1. Mention ONLY potential issues. If a file or chunk looks good, do not mention it.
