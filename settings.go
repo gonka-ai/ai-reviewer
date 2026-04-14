@@ -213,20 +213,24 @@ func (h *OutputHandler) Println(a ...any) {
 }
 
 type RunSettings struct {
-	Command        string
-	Repo           string
-	PRNumber       string
-	CommitHash     string
-	CompareTo      string
-	FilePatterns   []string
-	MaxTokens      *int
-	Concurrency    int
-	ModelProfile   string
-	InitialCwd     string
-	ExeDir         string
-	DryRun         bool
-	ContextEval    bool
-	ContextEvalCSV string
+	Command               string
+	Repo                  string
+	PRNumber              string
+	CommitHash            string
+	CompareTo             string
+	FilePatterns          []string
+	MaxTokens             *int
+	Concurrency           int
+	ModelProfile          string
+	InitialCwd            string
+	ExeDir                string
+	DryRun                bool
+	ContextEval           bool
+	ContextEvalCSV        string
+	IncludePersonas       []string
+	ExcludePersonas       []string
+	ExcludePostExplainers bool
+	PromptOnly            bool
 }
 
 type RunConfig struct {
@@ -567,6 +571,20 @@ func (rc *RunConfig) getModelInfo(p Persona) string {
 func (rc *RunConfig) filterPersonas() {
 	rc.OutputHandler.Println("--- Filtering personas...")
 	for _, p := range rc.Personas {
+		// CLI: Include filter
+		if len(rc.Settings.IncludePersonas) > 0 {
+			found := false
+			for _, id := range rc.Settings.IncludePersonas {
+				if id == p.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
 		fs := p.Filters
 		if len(fs.IncludeFilters) == 0 && rc.PRInfo.BaseRefOid == rc.PRInfo.HeadRefOid && !rc.PRInfo.IsCommit {
 			fs.IncludeFilters = rc.PRInfo.FilePatterns
@@ -600,6 +618,19 @@ func (rc *RunConfig) filterPersonas() {
 			}) {
 				skip = false
 				break
+			}
+		}
+
+		// CLI: Exclude filters
+		if !skip {
+			for _, id := range rc.Settings.ExcludePersonas {
+				if id == p.ID {
+					skip = true
+					break
+				}
+			}
+			if !skip && rc.Settings.ExcludePostExplainers && p.Role == "explainer" && p.Stage == "post" {
+				skip = true
 			}
 		}
 
@@ -641,7 +672,7 @@ func (rc *RunConfig) filterPersonas() {
 	}
 
 	if len(rc.PreRunToSkip) > 0 || len(rc.ReviewersToSkip) > 0 || len(rc.PostRunToSkip) > 0 {
-		rc.OutputHandler.Println("    To be skipped (no matching files):")
+		rc.OutputHandler.Println("    To be skipped:")
 		for _, r := range rc.PreRunToSkip {
 			rc.OutputHandler.Printf("      - %s [%s]\n", r.Persona.ColoredID, rc.getModelInfo(r.Persona))
 		}
@@ -669,6 +700,10 @@ func (s *RunSettings) parsePRArgs(args []string) {
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
 	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
+	includePersonas := fs.String("include-personas", "", "Only run these personas (comma-separated IDs)")
+	excludePersonas := fs.String("exclude-personas", "", "Exclude these personas (comma-separated IDs)")
+	excludePostExplainers := fs.Bool("exclude-post-explainers", false, "Exclude all post-run explainers")
+	promptOnly := fs.Bool("prompt-only", false, "Run pre-explainers, generate prompts for others, then stop")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -680,6 +715,10 @@ func (s *RunSettings) parsePRArgs(args []string) {
 	s.DryRun = *dryRun
 	s.ContextEval = *contextEval
 	s.ContextEvalCSV = *contextEvalCSV
+	s.IncludePersonas = s.parseCommaList(*includePersonas)
+	s.ExcludePersonas = s.parseCommaList(*excludePersonas)
+	s.ExcludePostExplainers = *excludePostExplainers
+	s.PromptOnly = *promptOnly
 
 	if len(remaining) < 2 {
 		s.PrintUsage()
@@ -698,6 +737,10 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
 	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
+	includePersonas := fs.String("include-personas", "", "Only run these personas (comma-separated IDs)")
+	excludePersonas := fs.String("exclude-personas", "", "Exclude these personas (comma-separated IDs)")
+	excludePostExplainers := fs.Bool("exclude-post-explainers", false, "Exclude all post-run explainers")
+	promptOnly := fs.Bool("prompt-only", false, "Run pre-explainers, generate prompts for others, then stop")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -710,6 +753,10 @@ func (s *RunSettings) parseCommitArgs(args []string) {
 	s.DryRun = *dryRun
 	s.ContextEval = *contextEval
 	s.ContextEvalCSV = *contextEvalCSV
+	s.IncludePersonas = s.parseCommaList(*includePersonas)
+	s.ExcludePersonas = s.parseCommaList(*excludePersonas)
+	s.ExcludePostExplainers = *excludePostExplainers
+	s.PromptOnly = *promptOnly
 
 	if len(remaining) < 2 {
 		s.PrintUsage()
@@ -727,6 +774,10 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
 	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
+	includePersonas := fs.String("include-personas", "", "Only run these personas (comma-separated IDs)")
+	excludePersonas := fs.String("exclude-personas", "", "Exclude these personas (comma-separated IDs)")
+	excludePostExplainers := fs.Bool("exclude-post-explainers", false, "Exclude all post-run explainers")
+	promptOnly := fs.Bool("prompt-only", false, "Run pre-explainers, generate prompts for others, then stop")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -738,6 +789,10 @@ func (s *RunSettings) parseFileArgs(args []string) {
 	s.DryRun = *dryRun
 	s.ContextEval = *contextEval
 	s.ContextEvalCSV = *contextEvalCSV
+	s.IncludePersonas = s.parseCommaList(*includePersonas)
+	s.ExcludePersonas = s.parseCommaList(*excludePersonas)
+	s.ExcludePostExplainers = *excludePostExplainers
+	s.PromptOnly = *promptOnly
 
 	if len(remaining) < 3 {
 		s.PrintUsage()
@@ -756,6 +811,10 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	dryRun := fs.Bool("dry-run", false, "Scan and report what will be run, but don't execute")
 	contextEval := fs.Bool("context-eval", false, "Prepare context for each persona and report sizes, but don't run personas")
 	contextEvalCSV := fs.String("context-eval-csv", "", "Output a detailed CSV file of the context evaluation")
+	includePersonas := fs.String("include-personas", "", "Only run these personas (comma-separated IDs)")
+	excludePersonas := fs.String("exclude-personas", "", "Exclude these personas (comma-separated IDs)")
+	excludePostExplainers := fs.Bool("exclude-post-explainers", false, "Exclude all post-run explainers")
+	promptOnly := fs.Bool("prompt-only", false, "Run pre-explainers, generate prompts for others, then stop")
 
 	remaining, _ := parseInterspersed(fs, args)
 
@@ -767,6 +826,10 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	s.DryRun = *dryRun
 	s.ContextEval = *contextEval
 	s.ContextEvalCSV = *contextEvalCSV
+	s.IncludePersonas = s.parseCommaList(*includePersonas)
+	s.ExcludePersonas = s.parseCommaList(*excludePersonas)
+	s.ExcludePostExplainers = *excludePostExplainers
+	s.PromptOnly = *promptOnly
 
 	if len(remaining) < 3 {
 		s.PrintUsage()
@@ -777,12 +840,39 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	s.CommitHash = remaining[2] // head
 }
 
+func (s *RunSettings) parseCommaList(list string) []string {
+	if list == "" {
+		return nil
+	}
+	parts := strings.Split(list, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 func (s *RunSettings) PrintUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  ai-reviewer pr <repo> <pr-number> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
-	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
-	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
-	fmt.Println("  ai-reviewer branches <repo> <base> <head> [--model-profile <name>] [--max-tokens <n>] [--concurrency <n>] [--dry-run] [--context-eval] [--context-eval-csv <file.csv>]")
+	fmt.Println("  ai-reviewer pr <repo> <pr-number> [options]")
+	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [options]")
+	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [options]")
+	fmt.Println("  ai-reviewer branches <repo> <base> <head> [options]")
+	fmt.Println("")
+	fmt.Println("Options:")
+	fmt.Println("  --model-profile <name>       Model profile to use from config.yaml")
+	fmt.Println("  --max-tokens <n>             Override max tokens for AI response")
+	fmt.Println("  --concurrency <n>            Max concurrent personas")
+	fmt.Println("  --dry-run                    Scan and report what will be run, but don't execute")
+	fmt.Println("  --context-eval               Prepare context for each persona and report sizes, but don't run personas")
+	fmt.Println("  --context-eval-csv <file>    Output a detailed CSV file of the context evaluation")
+	fmt.Println("  --include-personas <ids>     Only run these personas (comma-separated IDs)")
+	fmt.Println("  --exclude-personas <ids>     Exclude these personas (comma-separated IDs)")
+	fmt.Println("  --exclude-post-explainers    Exclude all post-run explainers")
+	fmt.Println("  --prompt-only                Run pre-explainers, generate prompts for others, then stop")
 }
 
 func (s *RunSettings) TargetID() string {

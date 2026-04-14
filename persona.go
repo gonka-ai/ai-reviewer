@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -58,6 +61,31 @@ func LoadPersonas(searchPaths []string, repo string, headSHA string, oh *OutputH
 }
 
 func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, personaContext *PRContext) (string, ModelResult, time.Duration, []PrimerMatch, error) {
+	var preRunAnalyses map[string][]string
+	var summary string
+
+	if p.Role == "reviewer" || (p.Role == "explainer" && p.Stage == "post") {
+		preRunAnalyses = rr.PreRunAnalyses
+	}
+	if p.Role == "explainer" && p.Stage == "post" {
+		summary = rr.Summary
+	}
+
+	matchedPrimers := rc.FindMatches(personaContext)
+	prompt := buildPrompt(p, personaContext, rc.Config.GlobalInstructions, preRunAnalyses, summary, matchedPrimers, rc.Config.PrimerTypes)
+
+	var cachePath string
+	if p.Role == "explainer" && p.Stage == "pre" && rc.PRInfo.HeadRefOid != "" {
+		h := sha256.New()
+		h.Write([]byte(p.Instructions))
+		h.Write([]byte(rc.PRInfo.HeadRefOid))
+		cachePath = filepath.Join(rc.OutputHandler.LogDir, "cache", "pre-explainers", hex.EncodeToString(h.Sum(nil))+".txt")
+
+		if data, err := os.ReadFile(cachePath); err == nil {
+			return prompt, ModelResult{Text: string(data), Model: "cached"}, 0, matchedPrimers, nil
+		}
+	}
+
 	profile, ok := rc.Config.ModelProfiles[rc.ActiveProfile]
 	if !ok {
 		return "", ModelResult{}, 0, nil, fmt.Errorf("active profile %s not found in config", rc.ActiveProfile)
@@ -84,19 +112,9 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		maxTokens = *rc.Settings.MaxTokens
 	}
 
-	var preRunAnalyses map[string][]string
-	var summary string
-
-	if p.Role == "reviewer" || (p.Role == "explainer" && p.Stage == "post") {
-		preRunAnalyses = rr.PreRunAnalyses
+	if rc.Settings.PromptOnly && !(p.Role == "explainer" && p.Stage == "pre") {
+		return prompt, ModelResult{}, 0, matchedPrimers, nil
 	}
-	if p.Role == "explainer" && p.Stage == "post" {
-		summary = rr.Summary
-	}
-
-	matchedPrimers := rc.FindMatches(personaContext)
-
-	prompt := buildPrompt(p, personaContext, rc.Config.GlobalInstructions, preRunAnalyses, summary, matchedPrimers, rc.Config.PrimerTypes)
 
 	personaCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -112,6 +130,11 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		return prompt, ModelResult{}, 0, matchedPrimers, err
 	}
 	elapsed := time.Since(start)
+
+	if cachePath != "" {
+		_ = os.MkdirAll(filepath.Dir(cachePath), 0755)
+		_ = os.WriteFile(cachePath, []byte(result.Text), 0644)
+	}
 
 	return prompt, result, elapsed, matchedPrimers, nil
 }
@@ -138,6 +161,11 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 	rc.OutputHandler.Printf("    <- Finished %s in %s\n", pr.Persona.ColoredID, elapsed.Round(time.Millisecond))
 
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "prompt.md"), prompt)
+
+	if rc.Settings.PromptOnly && !(pr.Persona.Role == "explainer" && pr.Persona.Stage == "pre") {
+		return nil
+	}
+
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "raw.md"), result.Text)
 
 	// Stage-specific logic
@@ -216,3 +244,5 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 
 	return nil
 }
+
+// end of file

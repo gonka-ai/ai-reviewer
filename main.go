@@ -58,6 +58,13 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	// Stage 2: Reviewers
 	runPersonas(ctx, runConfig.ReviewersToRun, runConfig, runResults, sem, "reviewers")
 
+	if s.PromptOnly {
+		// Stage 3: Post-run Explainers
+		runPersonas(ctx, runConfig.PostRunToRun, runConfig, runResults, sem, "post-run explainers")
+		runConfig.OutputHandler.Println("--- Prompt generation complete. Stopping as requested by --prompt-only.")
+		return
+	}
+
 	// Stage 2.5: Waivers
 	ApplyWaivers(ctx, runConfig, runResults)
 

@@ -16,16 +16,16 @@ See [VISION.md](VISION.md) for the longer rationale and design philosophy.
 ```bash
 go build -o ai-review
 # Review a PR
-./ai-review pr <repo_owner>/<repo_name> <pr_number> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review pr <repo_owner>/<repo_name> <pr_number> [options]
 
 # Review a specific commit (compared to its parent by default)
-./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review commit <repo_owner>/<repo_name> <commit_hash> [--compare-to <hash>] [options]
 
 # Review specific files on a branch
-./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review file <repo_owner>/<repo_name> <branch_name> <file_pattern...> [options]
 
 # Review the diff between two branches
-./ai-review branches <repo_owner>/<repo_name> <base_branch> <head_branch> [--model-profile <name>] [--max-tokens <int>] [--concurrency <int>] [--dry-run]
+./ai-review branches <repo_owner>/<repo_name> <base_branch> <head_branch> [options]
 ```
 
 ### Global CLI Options
@@ -36,6 +36,10 @@ go build -o ai-review
 - `--dry-run`: Scan and report what personas and primers will be applied, but do not execute any AI calls. Useful for testing configuration and filtering logic without incurring costs.
 - `--context-eval`: Perform a detailed evaluation of the context window size for each persona. This runs pre-run explainers, calculates accurate token counts using `tiktoken`, and reports a breakdown of context components (persona instructions, primers, diffs, etc.) without executing the actual review personas.
 - `--context-eval-csv <file>`: In addition to the console report, output the context evaluation data to a CSV file. This is designed for TreeMap visualizations, with a hierarchical `path` column (e.g., `"persona,category,subcategory"`).
+- `--include-personas <ids>`: Only run these specific personas (comma-separated list of IDs).
+- `--exclude-personas <ids>`: Exclude these specific personas (comma-separated list of IDs).
+- `--exclude-post-explainers`: Exclude all post-run explainers. Useful if you only want the review findings without high-level context or guides.
+- `--prompt-only`: Runs all pre-run explainers fully, then generates and saves the prompts for all reviewers and post-run explainers without executing them. This is useful for manual review of AI prompts or for feeding them into a different tool. Any dependencies (like the summary of findings) are automatically omitted from the prompts in this mode.
 
 ### Examples:
 ```bash
@@ -62,6 +66,12 @@ go build -o ai-review
 
 # Export context evaluation to CSV for visualization
 ./ai-review pr google/go-github 1234 --context-eval --context-eval-csv evaluation.csv
+
+# Only run specific reviewers
+./ai-review pr google/go-github 1234 --include-personas security,style
+
+# Exclude specific reviewers and all post-run explainers
+./ai-review pr google/go-github 1234 --exclude-personas logging --exclude-post-explainers
 ```
 
 ## Setup
