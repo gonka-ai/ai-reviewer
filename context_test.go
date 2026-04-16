@@ -6,6 +6,32 @@ import (
 	"time"
 )
 
+func TestFilterSet_Compile(t *testing.T) {
+	fs := &FilterSet{
+		RawRegexFilters: []string{"^test.*"},
+		IssueRegexes:    []string{"issue.*"},
+	}
+
+	err := fs.Compile()
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	if len(fs.RegexFilters) != 1 {
+		t.Errorf("Expected 1 RegexFilter, got %d", len(fs.RegexFilters))
+	}
+	if len(fs.IssueRegexObjects) != 1 {
+		t.Errorf("Expected 1 IssueRegexObject, got %d", len(fs.IssueRegexObjects))
+	}
+
+	if !fs.RegexFilters[0].MatchString("test123") {
+		t.Error("RegexFilter didn't match")
+	}
+	if !fs.IssueRegexObjects[0].MatchString("issue456") {
+		t.Error("IssueRegexObject didn't match")
+	}
+}
+
 func TestFilterSet_MatchesPath(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -353,12 +379,77 @@ func TestFilterSet_Matches(t *testing.T) {
 			opts: MatchOptions{Filename: "main.go", Branch: "feature"},
 			want: false,
 		},
+		{
+			name: "Issue regex match (Summary)",
+			fs: FilterSet{
+				IssueRegexes: []string{"leak"},
+			},
+			opts: MatchOptions{FindingSummary: "Goroutine leak detected"},
+			want: true,
+		},
+		{
+			name: "Issue regex match (Details)",
+			fs: FilterSet{
+				IssueRegexes: []string{"leak"},
+			},
+			opts: MatchOptions{FindingDetails: "Wait, there's a memory leak here."},
+			want: true,
+		},
+		{
+			name: "Issue regex no match",
+			fs: FilterSet{
+				IssueRegexes: []string{"leak"},
+			},
+			opts: MatchOptions{FindingSummary: "Fixed bug"},
+			want: false,
+		},
+		{
+			name: "Any filter with issue regex",
+			fs: FilterSet{
+				Any: []FilterSet{
+					{
+						IncludeFilters: []string{"*.go"},
+						IssueRegexes:   []string{"GoLeak"},
+					},
+					{
+						IncludeFilters: []string{"*.js"},
+						IssueRegexes:   []string{"JsLeak"},
+					},
+				},
+			},
+			opts: MatchOptions{
+				Filename:       "test.go",
+				FindingSummary: "GoLeak found",
+			},
+			want: true,
+		},
+		{
+			name: "Any filter with issue regex (no match)",
+			fs: FilterSet{
+				Any: []FilterSet{
+					{
+						IncludeFilters: []string{"*.go"},
+						IssueRegexes:   []string{"GoLeak"},
+					},
+					{
+						IncludeFilters: []string{"*.js"},
+						IssueRegexes:   []string{"JsLeak"},
+					},
+				},
+			},
+			opts: MatchOptions{
+				Filename:       "test.js",
+				FindingSummary: "GoLeak found",
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			_ = tt.fs.Compile()
 			if got := tt.fs.Matches(tt.opts); got != tt.want {
-				t.Errorf("FilterSet.Matches() = %v, want %v", got, tt.want)
+				t.Errorf("%s: FilterSet.Matches() = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}

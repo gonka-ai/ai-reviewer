@@ -50,6 +50,8 @@ type FilterSet struct {
 	FunctionFilters   []string         `yaml:"function_filters"`
 	LineNumberFilters []LineRange      `yaml:"line_numbers_filter"`
 	DateFilter        string           `yaml:"date_filter"`
+	IssueRegexes      []string         `yaml:"issue_regexes"`
+	IssueRegexObjects []*regexp.Regexp `yaml:"-"`
 
 	Any []FilterSet `yaml:"any,omitempty"`
 	All []FilterSet `yaml:"all,omitempty"`
@@ -62,6 +64,8 @@ type MatchOptions struct {
 	CommitDate         time.Time
 	ChangedLineNumbers []int
 	ChangedLines       []string
+	FindingSummary     string
+	FindingDetails     string
 }
 
 func (fs *FilterSet) Matches(opts MatchOptions) bool {
@@ -136,6 +140,19 @@ func (fs *FilterSet) Matches(opts MatchOptions) bool {
 		}
 	}
 
+	if len(fs.IssueRegexObjects) > 0 {
+		matched := false
+		for _, re := range fs.IssueRegexObjects {
+			if re.MatchString(opts.FindingSummary) || re.MatchString(opts.FindingDetails) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
 	if len(fs.RegexFilters) == 0 {
 		return true
 	}
@@ -150,9 +167,11 @@ func (fs *FilterSet) Matches(opts MatchOptions) bool {
 }
 
 type FileMatchOptions struct {
-	FilterSet  *FilterSet
-	Branch     string
-	CommitDate time.Time
+	FilterSet      *FilterSet
+	Branch         string
+	CommitDate     time.Time
+	FindingSummary string
+	FindingDetails string
 }
 
 func (f FileContext) Matches(opts FileMatchOptions) bool {
@@ -166,6 +185,8 @@ func (f FileContext) Matches(opts FileMatchOptions) bool {
 		CommitDate:         opts.CommitDate,
 		ChangedLineNumbers: f.ChangedLineNumbers(),
 		ChangedLines:       f.ChangedLines,
+		FindingSummary:     opts.FindingSummary,
+		FindingDetails:     opts.FindingDetails,
 	})
 }
 
@@ -467,6 +488,13 @@ func (fs *FilterSet) Compile() error {
 			return fmt.Errorf("invalid regex %s: %w", r, err)
 		}
 		fs.RegexFilters = append(fs.RegexFilters, re)
+	}
+	for _, r := range fs.IssueRegexes {
+		re, err := regexp.Compile(r)
+		if err != nil {
+			return fmt.Errorf("invalid issue regex %s: %w", r, err)
+		}
+		fs.IssueRegexObjects = append(fs.IssueRegexObjects, re)
 	}
 	for i := range fs.Any {
 		if err := fs.Any[i].Compile(); err != nil {

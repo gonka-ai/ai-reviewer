@@ -85,9 +85,11 @@ func ApplyWaivers(ctx context.Context, rc *RunConfig, rr *RunResults) {
 			}
 
 			if fileCtx.Matches(FileMatchOptions{
-				FilterSet:  &fs,
-				Branch:     rc.GlobalContext.Branch,
-				CommitDate: rc.GlobalContext.CommitDate,
+				FilterSet:      &fs,
+				Branch:         rc.GlobalContext.Branch,
+				CommitDate:     rc.GlobalContext.CommitDate,
+				FindingSummary: finding.Summary,
+				FindingDetails: finding.Details,
 			}) {
 				// Also check line numbers if specified
 				if len(fs.LineNumberFilters) > 0 {
@@ -111,6 +113,7 @@ func ApplyWaivers(ctx context.Context, rc *RunConfig, rr *RunResults) {
 						continue
 					}
 				}
+
 				applicableWaivers = append(applicableWaivers, w)
 			}
 		}
