@@ -58,6 +58,7 @@ Watch for:
 - Silent failures
 - Overly broad equality checks
 - Assertions that mask the root cause
+- Unnecessarily specific assertions that hard-code incidental details and make the test brittle without improving what it proves
 
 ---
 
