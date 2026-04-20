@@ -26,7 +26,23 @@ go build -o ai-review
 
 # Review the diff between two branches
 ./ai-review branches <repo_owner>/<repo_name> <base_branch> <head_branch> [options]
+
+# Get raw matching primers for planned changes (deterministic, no AI calls)
+./ai-review context primers <repo_owner>/<repo_name> [--files <f>] [--functions <fn>] [--concepts <c>] [--format <fmt>]
+
+# Discover available authoring concepts (deterministic, no AI calls)
+./ai-review concepts <repo_owner>/<repo_name> [--files <f>] [--functions <fn>] [--format <fmt>]
 ```
+
+### Primers and Concepts
+
+Primers are project-specific instructions that help AI reviewers understand your codebase's conventions, architecture, and constraints. They can declare `authoring_concepts` in their frontmatter.
+
+Coding agents can use the `concepts` command to discover the shared vocabulary of a repository before deciding which context to load:
+
+1.  Call `ai-review concepts <repo>` to see available concepts.
+2.  Filter them by providing `--files` or `--functions` if needed.
+3.  Choose relevant concepts and load full primer context using `ai-review context primers --concepts <concepts>`.
 
 ### Global CLI Options
 
@@ -72,6 +88,18 @@ go build -o ai-review
 
 # Exclude specific reviewers and all post-run explainers
 ./ai-review pr google/go-github 1234 --exclude-personas logging --exclude-post-explainers
+
+# Get primers for planned changes to specific files and functions
+./ai-review context primers google/go-github --files "src/auth.go" --functions "Login"
+
+# Get primers matching specific authoring concepts in JSON format
+./ai-review context primers google/go-github --concepts "security,auth" --format json
+
+# Discover all available authoring concepts for a repo
+./ai-review concepts google/go-github
+
+# Discover concepts relevant to specific files
+./ai-review concepts google/go-github --files "src/auth.go" --format names
 ```
 
 ## Setup
@@ -156,6 +184,32 @@ The tool scans for personas, primers, and waivers in two locations:
 - **Repo-scoped local directories**: Any `.md` file within `.ai-review/<owner>/<repo>/personas/`, `.ai-review/<owner>/<repo>/primers/`, or `.ai-review/<owner>/<repo>/waivers/` is automatically loaded from the local checkout of this tool. All subdirectories are searched recursively. Files in these directories do **not** require an `ai_review` field in their frontmatter.
 
 The local checkout is repo-scoped only. The tool does not load local global directories like `.ai-review/personas/` or arbitrary local Markdown files outside `.ai-review/<owner>/<repo>/...`.
+
+### Context Primers
+
+The `context primers` command is a deterministic tool for pre-authoring context lookup. It does not make any AI calls or require a review run to exist. It is designed for external coding agents (like Codex, Claude Code, or Junie) to load relevant repository context before starting a change. It does not require `gh` to be installed as it operates on local files.
+
+Matches are determined by a combination of regular filters and authoring concepts:
+- **Regular Filters**: `path_filters` (matched against `--files`) and `function_filters` (matched against `--functions`).
+- **Authoring Concepts**: `authoring_concepts` (defined in primer frontmatter and matched against `--concepts`).
+
+**Matching Rules:**
+- If a primer has `authoring_concepts` and the user provided `--concepts`, **both** the regular filters and at least one concept must match.
+- If the primer has no `authoring_concepts`, only regular filters must match.
+- If the user provided no `--concepts`, only regular filters must match.
+- If the user provided `--concepts` but the primer has no `authoring_concepts`, the concepts do not affect the match (only regular filters are checked).
+- Concept-only input (without `--files` or `--functions`) will only match primers that have no regular filters (or empty filters).
+
+#### Example Primer with Authoring Concepts:
+```markdown
+---
+id: governance-parameters
+type: implementation
+authoring_concepts: ["governance", "params"]
+path_filters: ["./inference-chain/**/params.go"] 
+---
+Parameters are controlled via governance votes...
+```
 
 ### Personas
 

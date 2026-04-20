@@ -1,11 +1,13 @@
 package main
 
 type Primer struct {
-	ID       string    `yaml:"id"`
-	AIReview string    `yaml:"ai_review"`
-	Type     string    `yaml:"type"`
-	Filters  FilterSet `yaml:",inline"`
-	Content  string
+	ID                string    `yaml:"id"`
+	AIReview          string    `yaml:"ai_review"`
+	Type              string    `yaml:"type"`
+	Filters           FilterSet `yaml:",inline"`
+	AuthoringConcepts []string  `yaml:"authoring_concepts"`
+	Content           string
+	SourcePath        string
 }
 
 type PrimerMatch struct {
@@ -27,6 +29,7 @@ func LoadPrimers(searchPaths []string, repo string, headSHA string, oh *OutputHa
 	for _, res := range results {
 		p := res.Raw.(*Primer)
 		p.Content = res.Instructions
+		p.SourcePath = res.SourcePath
 		primers = append(primers, *p)
 	}
 

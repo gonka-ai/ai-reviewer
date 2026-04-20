@@ -231,6 +231,12 @@ type RunSettings struct {
 	ExcludePersonas       []string
 	ExcludePostExplainers bool
 	PromptOnly            bool
+
+	// Context Primers
+	ContextFormat    string
+	PlannedFiles     []string
+	PlannedFunctions []string
+	PlannedConcepts  []string
 }
 
 type RunConfig struct {
@@ -290,7 +296,7 @@ func NewRunSettingsFromArgs(args []string) *RunSettings {
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "-") {
-			if arg == "pr" || arg == "commit" || arg == "file" || arg == "branches" {
+			if arg == "pr" || arg == "commit" || arg == "file" || arg == "branches" || arg == "context" || arg == "concepts" {
 				command = arg
 				commandIdx = i
 				break
@@ -318,6 +324,15 @@ func NewRunSettingsFromArgs(args []string) *RunSettings {
 		s.parseFileArgs(subArgs)
 	case "branches":
 		s.parseBranchesArgs(subArgs)
+	case "context":
+		if len(subArgs) > 0 && subArgs[0] == "concepts" {
+			s.Command = "concepts"
+			s.parseConceptsArgs(subArgs)
+		} else {
+			s.parseContextArgs(subArgs)
+		}
+	case "concepts":
+		s.parseConceptsArgs(subArgs)
 	default:
 		fmt.Printf("Unknown command: %s\n", s.Command)
 		s.PrintUsage()
@@ -840,6 +855,60 @@ func (s *RunSettings) parseBranchesArgs(args []string) {
 	s.CommitHash = remaining[2] // head
 }
 
+func (s *RunSettings) parseConceptsArgs(args []string) {
+	commandName := "concepts"
+	startIdx := 0
+	if len(args) > 0 && args[0] == "concepts" {
+		startIdx = 1
+		commandName = "context concepts"
+	}
+
+	fs := flag.NewFlagSet(commandName, flag.ExitOnError)
+	files := fs.String("files", "", "Comma-separated list of planned target files")
+	functions := fs.String("functions", "", "Comma-separated list of planned target functions")
+	format := fs.String("format", "markdown", "Output format (json, markdown, names)")
+
+	remaining, _ := parseInterspersed(fs, args[startIdx:])
+
+	if len(remaining) < 1 {
+		fmt.Println("Error: Missing repo identifier")
+		s.PrintUsage()
+		os.Exit(1)
+	}
+
+	s.Repo = remaining[0]
+	s.PlannedFiles = s.parseCommaList(*files)
+	s.PlannedFunctions = s.parseCommaList(*functions)
+	s.ContextFormat = strings.ToLower(*format)
+}
+
+func (s *RunSettings) parseContextArgs(args []string) {
+	if len(args) < 1 || args[0] != "primers" {
+		s.PrintUsage()
+		os.Exit(1)
+	}
+
+	fs := flag.NewFlagSet("context primers", flag.ExitOnError)
+	files := fs.String("files", "", "Comma-separated list of planned target files")
+	functions := fs.String("functions", "", "Comma-separated list of planned target functions")
+	concepts := fs.String("concepts", "", "Comma-separated list of planned target concepts")
+	format := fs.String("format", "markdown", "Output format (json, markdown)")
+
+	remaining, _ := parseInterspersed(fs, args[1:])
+
+	if len(remaining) < 1 {
+		fmt.Println("Error: Missing repo identifier")
+		s.PrintUsage()
+		os.Exit(1)
+	}
+
+	s.Repo = remaining[0]
+	s.PlannedFiles = s.parseCommaList(*files)
+	s.PlannedFunctions = s.parseCommaList(*functions)
+	s.PlannedConcepts = s.parseCommaList(*concepts)
+	s.ContextFormat = strings.ToLower(*format)
+}
+
 func (s *RunSettings) parseCommaList(list string) []string {
 	if list == "" {
 		return nil
@@ -861,6 +930,8 @@ func (s *RunSettings) PrintUsage() {
 	fmt.Println("  ai-reviewer commit <repo> <commit-hash> [--compare-to <hash>] [options]")
 	fmt.Println("  ai-reviewer file <repo> <branch> <file1> <file2> ... [options]")
 	fmt.Println("  ai-reviewer branches <repo> <base> <head> [options]")
+	fmt.Println("  ai-reviewer context primers <repo> [--files <f>] [--functions <fn>] [--concepts <c>] [--format <fmt>]")
+	fmt.Println("  ai-reviewer concepts <repo> [--files <f>] [--functions <fn>] [--format <fmt>]")
 	fmt.Println("")
 	fmt.Println("Options:")
 	fmt.Println("  --model-profile <name>       Model profile to use from config.yaml")
@@ -912,6 +983,10 @@ func (s *RunSettings) IsFile() bool {
 
 func (s *RunSettings) IsBranches() bool {
 	return s.Command == "branches"
+}
+
+func (s *RunSettings) IsContext() bool {
+	return s.Command == "context" || s.Command == "concepts"
 }
 
 func (s *RunSettings) RunDir() string {

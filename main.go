@@ -22,8 +22,17 @@ func main() {
 
 	// 1. Check dependencies
 	fmt.Println("--- Checking dependencies...")
-	if err := checkDependencies(); err != nil {
+	if err := checkDependencies(s); err != nil {
 		log.Fatal(err)
+	}
+
+	if s.IsContext() {
+		if s.Command == "concepts" {
+			runContextConcepts(ctx, s)
+		} else {
+			runContextPrimers(ctx, s)
+		}
+		return
 	}
 
 	// 2. Load RunConfig (Discovered settings)
@@ -264,13 +273,13 @@ func runContextEval(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	}
 }
 
-func checkDependencies() error {
-	_, err := exec.LookPath("gh")
-	if err != nil {
-		return fmt.Errorf("github cli (gh) is not installed")
+func checkDependencies(s *RunSettings) error {
+	if !s.IsContext() {
+		if _, err := exec.LookPath("gh"); err != nil {
+			return fmt.Errorf("github cli (gh) is not installed")
+		}
 	}
-	_, err = exec.LookPath("git")
-	if err != nil {
+	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git is not installed")
 	}
 	return nil

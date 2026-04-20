@@ -68,6 +68,19 @@ type MatchOptions struct {
 	FindingDetails     string
 }
 
+func (fs *FilterSet) IsEmpty() bool {
+	return len(fs.IncludeFilters) == 0 &&
+		len(fs.ExcludeFilters) == 0 &&
+		len(fs.RawRegexFilters) == 0 &&
+		len(fs.BranchFilters) == 0 &&
+		len(fs.FunctionFilters) == 0 &&
+		len(fs.LineNumberFilters) == 0 &&
+		fs.DateFilter == "" &&
+		len(fs.IssueRegexes) == 0 &&
+		len(fs.Any) == 0 &&
+		len(fs.All) == 0
+}
+
 func (fs *FilterSet) Matches(opts MatchOptions) bool {
 	if len(fs.Any) > 0 {
 		for _, sub := range fs.Any {

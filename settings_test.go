@@ -44,6 +44,18 @@ func TestFlagParsing(t *testing.T) {
 			wantPR:      "123",
 			wantDryRun:  true,
 		},
+		{
+			name:        "Top-level concepts command",
+			args:        []string{"ai-reviewer", "concepts", "owner/repo", "--files", "main.go", "--functions", "HandleThing"},
+			wantCommand: "concepts",
+			wantRepo:    "owner/repo",
+		},
+		{
+			name:        "Context concepts command",
+			args:        []string{"ai-reviewer", "context", "concepts", "owner/repo", "--files", "main.go"},
+			wantCommand: "concepts",
+			wantRepo:    "owner/repo",
+		},
 	}
 
 	for _, tt := range tests {

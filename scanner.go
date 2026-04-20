@@ -17,6 +17,7 @@ type ScanTarget struct {
 	AIReview     string
 	Instructions string
 	Raw          any // Pointer to Persona or Primer
+	SourcePath   string
 }
 
 type Scanner struct {
@@ -46,7 +47,7 @@ func (s *Scanner) Load(expectedType string, targetFactory func() any) ([]ScanTar
 	}
 
 	// 1. Repo branch (Source of Truth)
-	if s.HeadSHA != "" {
+	if s.HeadSHA != "" && s.HeadSHA != "EMPTY" {
 		repoResults, err := s.scanRepo(s.HeadSHA, expectedType, targetFactory)
 		if err != nil {
 			loadErrs = append(loadErrs, err)
@@ -62,6 +63,17 @@ func (s *Scanner) Load(expectedType string, targetFactory func() any) ([]ScanTar
 		loadErrs = append(loadErrs, err)
 	}
 	for _, res := range dedicated {
+		if _, ok := resultsMap[res.ID]; !ok {
+			resultsMap[res.ID] = res
+		}
+	}
+
+	// 3. Search paths (loose files with ai_review tag)
+	loose, err := s.scanFiles(s.SearchPaths, false, expectedType, targetFactory)
+	if err != nil {
+		loadErrs = append(loadErrs, err)
+	}
+	for _, res := range loose {
 		if _, ok := resultsMap[res.ID]; !ok {
 			resultsMap[res.ID] = res
 		}
@@ -210,6 +222,7 @@ func (s *Scanner) processFile(path string, content []byte, expectedType string, 
 		AIReview:     aiReview,
 		Instructions: string(rest),
 		Raw:          target,
+		SourcePath:   path,
 	}, true, nil
 }
 

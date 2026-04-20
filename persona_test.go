@@ -45,7 +45,7 @@ You are a test explainer.
 	}
 
 	oh := &OutputHandler{}
-	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "HEAD", oh)
+	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "EMPTY", oh)
 	if err != nil {
 		t.Fatalf("Failed to load personas: %v", err)
 	}
@@ -141,7 +141,7 @@ Instructions 3
 	}
 
 	oh := &OutputHandler{}
-	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "HEAD", oh)
+	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "EMPTY", oh)
 	if err != nil {
 		t.Fatalf("Failed to load personas: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestScanner_SkipsIrrelevantFilesAndDirs(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "valid.md"), []byte(personaContent), 0644)
 
 	oh := &OutputHandler{}
-	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "", oh)
+	personas, err := LoadPersonas([]string{tmpDir}, "test-repo", "EMPTY", oh)
 	if err != nil {
 		t.Fatalf("LoadPersonas failed: %v", err)
 	}
