@@ -73,3 +73,16 @@ model_definitions:
     max_tokens: 4096
     input_price_per_million: 0.25
     output_price_per_million: 1.25
+
+  deepseek_chat:
+    provider: deepseek
+    model: deepseek-chat
+    max_tokens: 8192
+    input_price_per_million: 0.27
+    output_price_per_million: 1.10
+  deepseek_reasoner:
+    provider: deepseek
+    model: deepseek-reasoner
+    max_tokens: 8192
+    input_price_per_million: 0.55
+    output_price_per_million: 2.19
