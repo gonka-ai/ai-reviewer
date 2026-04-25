@@ -67,11 +67,17 @@ const (
 	FrontierBest ModelCategory = "frontier_best"
 )
 
-// OpenAI Client
+// OpenAI Client (also used for OpenAI-compatible APIs like DeepSeek)
 type OpenAIClient struct {
 	client         *openai.Client
 	model          string
 	reasoningLevel string
+	providerName   string
+	// compatMode is true for OpenAI-compatible APIs (e.g. DeepSeek) that
+	// don't accept OpenAI-specific fields like max_completion_tokens or
+	// reasoning_effort. In compat mode we send max_tokens and skip
+	// reasoning_effort.
+	compatMode bool
 }
 
 func NewOpenAIClient(apiKey, model, reasoningLevel string) *OpenAIClient {
@@ -79,6 +85,19 @@ func NewOpenAIClient(apiKey, model, reasoningLevel string) *OpenAIClient {
 		client:         openai.NewClient(apiKey),
 		model:          model,
 		reasoningLevel: reasoningLevel,
+		providerName:   "openai",
+	}
+}
+
+func NewDeepSeekClient(apiKey, model, reasoningLevel string) *OpenAIClient {
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = "https://api.deepseek.com/v1"
+	return &OpenAIClient{
+		client:         openai.NewClientWithConfig(cfg),
+		model:          model,
+		reasoningLevel: reasoningLevel,
+		providerName:   "deepseek",
+		compatMode:     true,
 	}
 }
 
@@ -110,10 +129,14 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 		}
 	}
 	if maxTokens > 0 {
-		req.MaxCompletionTokens = maxTokens
+		if c.compatMode {
+			req.MaxTokens = maxTokens
+		} else {
+			req.MaxCompletionTokens = maxTokens
+		}
 	}
 
-	if c.reasoningLevel != "" && c.reasoningLevel != "none" {
+	if !c.compatMode && c.reasoningLevel != "" && c.reasoningLevel != "none" {
 		req.ReasoningEffort = c.reasoningLevel
 	}
 
@@ -134,7 +157,7 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 		TokensIn:        tokensIn,
 		TokensOut:       tokensOut,
 		TokensReasoning: tokensReasoning,
-		Provider:        "openai",
+		Provider:        c.providerName,
 		Model:           modelDisplay,
 		FinishReason:    string(resp.Choices[0].FinishReason),
 	}, nil
@@ -377,6 +400,12 @@ func GetModelClient(ctx context.Context, provider, model, reasoningLevel string)
 			return nil, fmt.Errorf("GEMINI_API_KEY not set")
 		}
 		return NewGeminiClient(ctx, apiKey, model, reasoningLevel)
+	case "deepseek":
+		apiKey := getEnv("DEEPSEEK_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("DEEPSEEK_API_KEY not set")
+		}
+		return NewDeepSeekClient(apiKey, model, reasoningLevel), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
