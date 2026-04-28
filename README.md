@@ -342,6 +342,7 @@ Each run generates a timestamped directory in `.ai-review/<repo_owner>/<repo_nam
 - `summary.md`: The aggregated Markdown summary.
 - `report.md`: The full report including explanations and stats.
 - `all_findings.json`: All normalized findings from all personas.
+- `agent_handoff.md`: A handoff prompt for a coding agent to help with review triage.
 - `persona_name/`: Subdirectories for each persona containing their `raw.md` output and `findings.json` (or `parsed.json`).
 
 Stats and token usage are also appended to `.ai-review/<repo_owner>/<repo_name>/run-log.jsonl`.

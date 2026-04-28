@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,8 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 )
+
+//go:embed agent_handoff.md.tmpl
+var handoffTemplateSource string
+
+var handoffTemplate = template.Must(template.New("handoff").Parse(handoffTemplateSource))
 
 func main() {
 	s := NewRunSettings()
@@ -71,6 +78,11 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 		// Stage 3: Post-run Explainers
 		runPersonas(ctx, runConfig.PostRunToRun, runConfig, runResults, sem, "post-run explainers")
 		runConfig.OutputHandler.Println("--- Prompt generation complete. Stopping as requested by --prompt-only.")
+
+		// Agent Handoff
+		handoff := generateAgentHandoff(runConfig, runResults)
+		runConfig.OutputHandler.SaveRunFile("agent_handoff.md", handoff)
+
 		return
 	}
 
@@ -121,7 +133,11 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	runConfig.OutputHandler.Printf("%s", runConfig.OutputHandler.Highlight(runResults.Report))
 	runConfig.OutputHandler.SaveRunFile("report.md", runConfig.OutputHandler.StripMarkers(runResults.Report))
 
-	// 9. Stats
+	// 9. Agent Handoff
+	handoff := generateAgentHandoff(runConfig, runResults)
+	runConfig.OutputHandler.SaveRunFile("agent_handoff.md", handoff)
+
+	// 10. Stats
 	runConfig.OutputHandler.SaveRunFile("stats.txt", runResults.GetStatsString())
 }
 
@@ -379,6 +395,91 @@ func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResult
 			out.WriteString(fmt.Sprintf("- **%s** (%s)\n", f.Summary, location))
 			out.WriteString(fmt.Sprintf("  %s\n\n", f.Details))
 		}
+	}
+
+	return out.String()
+}
+
+type handoffData struct {
+	Repository      string
+	ReviewType      string
+	PRNumber        string
+	PRTitle         string
+	BaseSHA         string
+	HeadSHA         string
+	BaseRef         string
+	HeadRef         string
+	FilePatterns    string
+	PRBody          string
+	Summary         string
+	Primers         []handoffPrimer
+	RunDir          string
+	PreRunPersonas  []string
+	ReviewPersonas  []string
+	PostRunPersonas []string
+}
+
+type handoffPrimer struct {
+	ID      string
+	Content string
+}
+
+func generateAgentHandoff(rc *RunConfig, rr *RunResults) string {
+	data := handoffData{
+		Repository: rc.Settings.Repo,
+		ReviewType: rc.Settings.Command,
+		PRNumber:   rc.Settings.PRNumber,
+		RunDir:     rc.RunDir,
+	}
+
+	if rc.PRInfo != nil {
+		data.PRTitle = rc.PRInfo.Title
+		data.BaseSHA = rc.PRInfo.BaseRefOid
+		data.HeadSHA = rc.PRInfo.HeadRefOid
+		data.BaseRef = rc.PRInfo.BaseRefName
+		data.HeadRef = rc.PRInfo.HeadRefName
+		data.PRBody = rc.PRInfo.Body
+	} else if rc.Settings.CommitHash != "" {
+		data.BaseSHA = rc.Settings.CompareTo
+		data.HeadSHA = rc.Settings.CommitHash
+	}
+
+	if rc.Settings.FilePatterns != nil {
+		data.FilePatterns = fmt.Sprintf("%v", rc.Settings.FilePatterns)
+	}
+
+	if rr.Summary != "" {
+		data.Summary = rc.OutputHandler.StripMarkers(rr.Summary)
+	}
+
+	matches := rc.FindMatches(rc.GlobalContext)
+	if len(matches) > 0 {
+		seen := make(map[string]bool)
+		for _, m := range matches {
+			if seen[m.Primer.ID] {
+				continue
+			}
+			seen[m.Primer.ID] = true
+			data.Primers = append(data.Primers, handoffPrimer{
+				ID:      m.Primer.ID,
+				Content: m.Primer.Content,
+			})
+		}
+	}
+
+	for _, pr := range rc.PreRunToRun {
+		data.PreRunPersonas = append(data.PreRunPersonas, pr.Persona.ID)
+	}
+	for _, pr := range rc.ReviewersToRun {
+		data.ReviewPersonas = append(data.ReviewPersonas, pr.Persona.ID)
+	}
+	for _, pr := range rc.PostRunToRun {
+		data.PostRunPersonas = append(data.PostRunPersonas, pr.Persona.ID)
+	}
+
+	var out strings.Builder
+	if err := handoffTemplate.Execute(&out, data); err != nil {
+		return fmt.Sprintf("Error generating handoff: %v", err)
 	}
 
 	return out.String()

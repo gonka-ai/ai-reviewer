@@ -290,6 +290,7 @@ Each run produces a timestamped run directory. Typical artifacts include:
 - `summary.md`
 - `report.md`
 - `all_findings.json`
+- `agent_handoff.md`
 - per-persona `prompt.md`
 - per-persona `raw.md`
 - per-persona `findings.json` or `parsed.json`
