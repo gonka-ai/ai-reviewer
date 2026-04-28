@@ -520,7 +520,7 @@ func TestPathIncluded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := pathIncluded(tt.path, tt.globs)
+			got := pathIncluded(tt.path, tt.globs, true)
 			if got != tt.want {
 				t.Errorf("pathIncluded(%q, %v) = %v, want %v", tt.path, tt.globs, got, tt.want)
 			}

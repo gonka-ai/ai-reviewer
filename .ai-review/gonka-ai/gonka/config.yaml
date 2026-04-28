@@ -102,6 +102,18 @@ primer_types:
     description: "Details about the implementation of an important subsystem in Gonka"
   caution:
     description: "A particularly important fact about a part of the Gonka network"
+global_excludes:
+  - "**/*.pb.go"
+  - "**/*.pb.gw.go"
+  - "**/*.pulsar.go"
+  - "**/docs/openapi.json"
+  - "inference-chain/contracts/*/artifacts/**"
+  - "proposals/ethereum-bridge-contact/artifacts/**"
+  - "**/go.sum"
+  - "**/poetry.lock"
+  - "**/package-lock.json"
+  - "**/Cargo.lock"
+  - "**/buf.lock"
 
 global_instructions: |
   This code is all using Go version 1.24.2

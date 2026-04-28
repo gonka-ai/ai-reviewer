@@ -44,6 +44,7 @@ type FileContext struct {
 type FilterSet struct {
 	IncludeFilters    []string         `yaml:"path_filters"`
 	ExcludeFilters    []string         `yaml:"exclude_filters"`
+	GlobalExcludes    []string         `yaml:"-"` // Passed from Config
 	RegexFilters      []*regexp.Regexp `yaml:"-"`
 	RawRegexFilters   []string         `yaml:"regex_filters"`
 	BranchFilters     []string         `yaml:"branch_filters"`
@@ -105,7 +106,7 @@ func (fs *FilterSet) Matches(opts MatchOptions) bool {
 	}
 
 	if len(fs.BranchFilters) > 0 {
-		if !pathIncluded(opts.Branch, fs.BranchFilters) {
+		if !pathIncluded(opts.Branch, fs.BranchFilters, true) {
 			return false
 		}
 	}
@@ -650,20 +651,27 @@ func (fs *FilterSet) MatchesPath(path string) bool {
 		return true
 	}
 
-	if !pathIncluded(path, fs.IncludeFilters) {
+	if !pathIncluded(path, fs.IncludeFilters, true) {
 		return false
 	}
 
-	if len(fs.ExcludeFilters) > 0 && pathIncluded(path, fs.ExcludeFilters) {
+	if len(fs.ExcludeFilters) > 0 && pathIncluded(path, fs.ExcludeFilters, false) {
 		return false
+	}
+
+	if len(fs.GlobalExcludes) > 0 {
+		// Global excludes are applied UNLESS explicitly included
+		if pathIncluded(path, fs.GlobalExcludes, false) && !pathIncluded(path, fs.IncludeFilters, false) {
+			return false
+		}
 	}
 
 	return true
 }
 
-func pathIncluded(path string, globs []string) bool {
+func pathIncluded(path string, globs []string, defaultOnEmpty bool) bool {
 	if len(globs) == 0 {
-		return true
+		return defaultOnEmpty
 	}
 	// pathspec.Match trims leading ./ from path, but it doesn't trim it from patterns.
 	// So we trim it from patterns ourselves.
@@ -709,13 +717,19 @@ func (fs *FilterSet) GetDiff(baseSHA, headSHA string) (string, error) {
 	// or triple-dot if comparing to parent (which ends up being same as double-dot).
 	// Let's use triple-dot as it's generally safer for PR-like workflows.
 	args := []string{"diff", fmt.Sprintf("%s...%s", baseSHA, headSHA)}
-	if len(fs.IncludeFilters) > 0 || len(fs.ExcludeFilters) > 0 {
+	if len(fs.IncludeFilters) > 0 || len(fs.ExcludeFilters) > 0 || len(fs.GlobalExcludes) > 0 {
 		args = append(args, "--")
 		for _, f := range fs.IncludeFilters {
 			args = append(args, f)
 		}
 		for _, f := range fs.ExcludeFilters {
 			args = append(args, ":(exclude)"+f)
+		}
+		for _, f := range fs.GlobalExcludes {
+			// Only exclude if not explicitly included
+			if !pathIncluded(f, fs.IncludeFilters, false) {
+				args = append(args, ":(exclude)"+f)
+			}
 		}
 	}
 

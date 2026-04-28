@@ -510,7 +510,10 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 
 	// 4. Extract context
 	rc.OutputHandler.Println("--- Extracting PR context...")
-	rc.GlobalContext, err = GetPRContext(rc.PRInfo, &FilterSet{IncludeFilters: s.FilePatterns})
+	rc.GlobalContext, err = GetPRContext(rc.PRInfo, &FilterSet{
+		IncludeFilters: s.FilePatterns,
+		GlobalExcludes: rc.Config.GlobalExcludes,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting context: %w", err)
 	}
@@ -601,6 +604,7 @@ func (rc *RunConfig) filterPersonas() {
 		}
 
 		fs := p.Filters
+		fs.GlobalExcludes = rc.Config.GlobalExcludes
 		if len(fs.IncludeFilters) == 0 && rc.PRInfo.BaseRefOid == rc.PRInfo.HeadRefOid && !rc.PRInfo.IsCommit {
 			fs.IncludeFilters = rc.PRInfo.FilePatterns
 		}

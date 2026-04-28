@@ -12,6 +12,7 @@ type Config struct {
 	ModelProfiles      map[string]map[string]ModelConfig `yaml:"model_profiles"`
 	DefaultProfile     string                            `yaml:"default_profile"`
 	GlobalInstructions string                            `yaml:"global_instructions"`
+	GlobalExcludes     []string                          `yaml:"global_excludes"`
 	PrimerTypes        map[string]PrimerType             `yaml:"primer_types"`
 }
 
@@ -155,6 +156,9 @@ func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, 
 		}
 		if cfg.GlobalInstructions != "" {
 			finalConfig.GlobalInstructions = cfg.GlobalInstructions
+		}
+		if len(cfg.GlobalExcludes) > 0 {
+			finalConfig.GlobalExcludes = append(finalConfig.GlobalExcludes, cfg.GlobalExcludes...)
 		}
 	}
 
