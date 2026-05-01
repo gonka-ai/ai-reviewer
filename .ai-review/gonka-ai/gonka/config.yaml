@@ -95,6 +95,18 @@ model_profiles:
     frontier_best:
       id: gpt_5.4_mini
 
+  deepseek:
+    cheap:
+      id: deepseek_chat
+    balanced:
+      id: deepseek_chat
+    fastest_good:
+      id: deepseek_chat
+    best_code:
+      id: deepseek_reasoner
+    frontier_best:
+      id: deepseek_reasoner
+
 primer_types:
   overview:
     description: "A broad overview of a major component of Gonka"
