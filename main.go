@@ -101,6 +101,7 @@ func runOne(ctx context.Context, runConfig *RunConfig, s *RunSettings) {
 	if err != nil {
 		runConfig.OutputHandler.Printf("Error aggregating findings: %v\n", err)
 		runResults.Summary = "Error generating aggregated summary."
+		runResults.AddError(err)
 	}
 	runConfig.OutputHandler.SaveRunFile("summary.md", runConfig.OutputHandler.StripMarkers(runResults.Summary))
 
@@ -155,6 +156,7 @@ func runPersonas(ctx context.Context, personas []PersonaRun, rc *RunConfig, rr *
 			defer func() { <-sem }()
 			if err := run.Execute(ctx, rc, rr); err != nil {
 				rc.OutputHandler.Printf("Error executing %s %s: %v, skipping\n", stageLabel, run.Persona.ColoredID, err)
+				rr.AddError(err)
 			}
 		}(run)
 	}
@@ -314,6 +316,16 @@ func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResult
 	}
 	out.WriteString(fmt.Sprintf("- **Base Commit:** `%s`\n", baseSHA))
 	out.WriteString(fmt.Sprintf("- **Head Commit:** `%s`\n\n", headSHA))
+
+	if len(rr.Errors) > 0 {
+		out.WriteString("## Execution Errors\n\n")
+		out.WriteString("The following errors occurred during execution:\n\n")
+		for _, errStr := range rr.Errors {
+			out.WriteString(fmt.Sprintf("- %s\n", errStr))
+		}
+		out.WriteString("\n")
+	}
+
 	out.WriteString(oh.LinkPersonas(rr.Summary))
 	out.WriteString("\n\n")
 
@@ -343,7 +355,7 @@ func generateReport(prNumber, commitHash, baseSHA, headSHA string, rr *RunResult
 
 		warning := ""
 		if s.FinishReason != "" && s.FinishReason != "STOP" && s.FinishReason != "stop" && s.FinishReason != "end_turn" && s.FinishReason != "FinishReasonStop" {
-			warning = fmt.Sprintf(" ⚠️ **Warning: %s**", s.FinishReason)
+			warning = fmt.Sprintf(" ⚠️ **Finish Reason: %s**", s.FinishReason)
 		}
 
 		reasoningStr := ""

@@ -26,6 +26,9 @@ type ModelConfig struct {
 	Model                 string  `yaml:"model"`
 	MaxTokens             *int    `yaml:"max_tokens"`
 	ReasoningLevel        string  `yaml:"reasoning_level,omitempty"` // none | low | medium | high
+	BaseURL               string  `yaml:"base_url,omitempty"`
+	BaseURLEnv            string  `yaml:"base_url_env,omitempty"`
+	APIKeyEnv             string  `yaml:"api_key_env,omitempty"`
 	InputPricePerMillion  float64 `yaml:"input_price_per_million"`
 	OutputPricePerMillion float64 `yaml:"output_price_per_million"`
 }
@@ -133,6 +136,15 @@ func LoadConfig(searchPaths []string, repo string, oh *OutputHandler) (*Config, 
 						}
 						if v.ReasoningLevel == "" {
 							v.ReasoningLevel = def.ReasoningLevel
+						}
+						if v.BaseURL == "" {
+							v.BaseURL = def.BaseURL
+						}
+						if v.BaseURLEnv == "" {
+							v.BaseURLEnv = def.BaseURLEnv
+						}
+						if v.APIKeyEnv == "" {
+							v.APIKeyEnv = def.APIKeyEnv
 						}
 						if v.InputPricePerMillion == 0 {
 							v.InputPricePerMillion = def.InputPricePerMillion

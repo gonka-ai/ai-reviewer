@@ -22,6 +22,7 @@ type RunLogEntry struct {
 	TokensReasoning int       `json:"tokens_reasoning,omitempty"`
 	TimeMS          int64     `json:"time_ms"`
 	RawOutput       string    `json:"raw_output,omitempty"`
+	Reasoning       string    `json:"reasoning,omitempty"`
 	Findings        []Finding `json:"findings,omitempty"`
 	Primers         []string  `json:"primers,omitempty"`
 	InputPrice      float64   `json:"input_price,omitempty"`  // Price per million tokens
@@ -36,6 +37,7 @@ type RunResults struct {
 	PostRunOutputs []string
 	PreRunAnalyses map[string][]string
 	Summary        string
+	Errors         []string
 	Report         string
 	StartTime      time.Time
 	TotalElapsed   time.Duration
@@ -49,6 +51,7 @@ type RunResults struct {
 	findingsMu       sync.Mutex
 	postRunOutputsMu sync.Mutex
 	preRunAnalysesMu sync.Mutex
+	errorsMu         sync.Mutex
 }
 
 func NewRunResults() *RunResults {
@@ -80,6 +83,15 @@ func (rr *RunResults) AddPreRunAnalysis(file string, analysis string) {
 	rr.preRunAnalysesMu.Lock()
 	defer rr.preRunAnalysesMu.Unlock()
 	rr.PreRunAnalyses[file] = append(rr.PreRunAnalyses[file], analysis)
+}
+
+func (rr *RunResults) AddError(err error) {
+	if err == nil {
+		return
+	}
+	rr.errorsMu.Lock()
+	defer rr.errorsMu.Unlock()
+	rr.Errors = append(rr.Errors, err.Error())
 }
 
 func (rr *RunResults) Finish() {
@@ -538,7 +550,7 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	rc.BalancedClient, err = GetModelClient(ctx, balancedCfg.Provider, balancedCfg.Model, balancedCfg.ReasoningLevel)
+	rc.BalancedClient, err = GetModelClient(ctx, balancedCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating balanced client: %w", err)
 	}
@@ -547,7 +559,7 @@ func NewRunConfig(ctx context.Context, s *RunSettings) (*RunConfig, error) {
 	if !ok {
 		fastestCfg = balancedCfg
 	}
-	rc.FastestClient, err = GetModelClient(ctx, fastestCfg.Provider, fastestCfg.Model, fastestCfg.ReasoningLevel)
+	rc.FastestClient, err = GetModelClient(ctx, fastestCfg)
 	if err != nil {
 		rc.FastestClient = rc.BalancedClient
 	}

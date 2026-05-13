@@ -111,6 +111,13 @@ Coding agents can use the `concepts` command to discover the shared vocabulary o
    - `OPENAI_API_KEY` for `provider: openai`
    - `ANTHROPIC_API_KEY` for `provider: anthropic`
    - `GEMINI_API_KEY` for `provider: gemini`
+   - `GONKA_BASE_URL` for `provider: kimi` when routing Kimi through the Gonka proxy
+   - optional `GONKA_API_TOKEN` if your Gonka endpoint expects bearer auth
+   - `MOONSHOT_BASE_URL` and `MOONSHOT_API_KEY` for `provider: kimi` when calling Moonshot directly
+
+The loader reads `KEYS.env` first and then process environment variables, so these values can live in `KEYS.env`.
+
+Treat `GONKA_BASE_URL` as sensitive transport data. If the proxy is unauthenticated, publishing the URL effectively publishes free access.
 
 You do not need to set all three unless your configuration uses all three.
 
@@ -140,7 +147,29 @@ model_definitions:
     max_tokens: 32000
     input_price_per_million: 0.10
     output_price_per_million: 0.40
+  kimi_k26_gonka:
+    provider: kimi
+    model: moonshotai/Kimi-K2.6
+    base_url_env: GONKA_BASE_URL
+    max_tokens: 32000
+    input_price_per_million: 0.00
+    output_price_per_million: 0.00
+  kimi_k26_moonshot:
+    provider: kimi
+    model: kimi-k2.6
+    base_url_env: MOONSHOT_BASE_URL
+    api_key_env: MOONSHOT_API_KEY
+    max_tokens: 32000
+    input_price_per_million: 0.95
+    output_price_per_million: 4.00
 ```
+
+`provider: kimi` currently supports a constrained v1 integration:
+- requests use regular non-streaming chat completions
+- transport is explicit per model definition, for example `GONKA_BASE_URL` or `MOONSHOT_BASE_URL`
+- native JSON mode is not used
+- `reasoning_level` is mapped to `chat_template_kwargs.thinking`:
+  any non-`none` value enables thinking, and `none` disables it
 
 #### 2. Model Profiles
 

@@ -128,6 +128,7 @@ func ApplyWaivers(ctx context.Context, rc *RunConfig, rr *RunResults) {
 				waived = true
 			} else if err != nil {
 				rc.OutputHandler.Printf("    Warning: error evaluating waivers for %s: %v\n", finding.File, err)
+				rr.AddError(err)
 			}
 		}
 
@@ -161,7 +162,7 @@ func evaluateWaivers(ctx context.Context, rc *RunConfig, finding Finding, waiver
 		modelCfg = profile[string(Balanced)]
 	}
 
-	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
+	client, err := GetModelClient(ctx, modelCfg)
 	if err != nil {
 		return nil, WaiverEvaluation{}, err
 	}

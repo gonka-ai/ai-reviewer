@@ -95,6 +95,34 @@ model_profiles:
     frontier_best:
       id: gpt_5.4_mini
 
+  gonka_kimi:
+    cheap:
+      id: kimi_k26_gonka
+    balanced:
+      id: kimi_k26_gonka
+    fastest_good:
+      id: kimi_k26_gonka
+    best_code:
+      id: kimi_k26_gonka
+      reasoning_level: low
+    frontier_best:
+      id: kimi_k26_gonka
+      reasoning_level: low
+
+  moonshot_kimi:
+    cheap:
+      id: kimi_k26_moonshot
+    balanced:
+      id: kimi_k26_moonshot
+    fastest_good:
+      id: kimi_k26_moonshot
+    best_code:
+      id: kimi_k26_moonshot
+      reasoning_level: low
+    frontier_best:
+      id: kimi_k26_moonshot
+      reasoning_level: low
+
 primer_types:
   overview:
     description: "A broad overview of a major component of Gonka"

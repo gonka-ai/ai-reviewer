@@ -180,7 +180,82 @@ func extractJSON(text string) string {
 			text = text[:endIdx]
 		}
 	}
-	return strings.TrimSpace(text)
+	text = strings.TrimSpace(text)
+	if isLikelyJSON(text) {
+		return text
+	}
+	if extracted := extractFirstJSONObjectOrArray(text); extracted != "" {
+		return extracted
+	}
+	return text
+}
+
+func isLikelyJSON(text string) bool {
+	if text == "" {
+		return false
+	}
+	return strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")
+}
+
+func extractFirstJSONObjectOrArray(text string) string {
+	start := -1
+	var open, close byte
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			start = i
+			open = '{'
+			close = '}'
+		case '[':
+			start = i
+			open = '['
+			close = ']'
+		}
+		if start != -1 {
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		if ch == open {
+			depth++
+			continue
+		}
+		if ch == close {
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(text[start : i+1])
+			}
+		}
+	}
+
+	return strings.TrimSpace(text[start:])
 }
 
 func NormalizePersonaOutput(ctx context.Context, client ModelClient, personaID, rawOutput string) ([]Finding, ModelResult, error) {

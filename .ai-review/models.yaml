@@ -73,3 +73,20 @@ model_definitions:
     max_tokens: 4096
     input_price_per_million: 0.25
     output_price_per_million: 1.25
+
+  kimi_k26_gonka:
+    provider: kimi
+    model: moonshotai/Kimi-K2.6
+    base_url_env: GONKA_BASE_URL
+    max_tokens: 32000
+    input_price_per_million: 0.00
+    output_price_per_million: 0.00
+
+  kimi_k26_moonshot:
+    provider: kimi
+    model: kimi-k2.6
+    base_url_env: MOONSHOT_BASE_URL
+    api_key_env: MOONSHOT_API_KEY
+    max_tokens: 32000
+    input_price_per_million: 0.95
+    output_price_per_million: 4.00

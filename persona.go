@@ -96,7 +96,7 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		return "", ModelResult{}, 0, nil, fmt.Errorf("no model mapping for category %s in profile %s", p.ModelCategory, rc.ActiveProfile)
 	}
 
-	client, err := GetModelClient(ctx, modelCfg.Provider, modelCfg.Model, modelCfg.ReasoningLevel)
+	client, err := GetModelClient(ctx, modelCfg)
 	if err != nil {
 		return "", ModelResult{}, 0, nil, fmt.Errorf("error creating client: %w", err)
 	}
@@ -116,7 +116,7 @@ func (p Persona) Run(ctx context.Context, rc *RunConfig, rr *RunResults, persona
 		return prompt, ModelResult{}, 0, matchedPrimers, nil
 	}
 
-	personaCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	personaCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	start := time.Now()
@@ -167,6 +167,9 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 	}
 
 	rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "raw.md"), result.Text)
+	if result.Reasoning != "" {
+		rc.OutputHandler.SaveRunFile(filepath.Join(pr.Persona.ID, "reasoning.md"), result.Reasoning)
+	}
 
 	// Stage-specific logic
 	var findings []Finding
@@ -232,6 +235,7 @@ func (pr PersonaRun) Execute(ctx context.Context, rc *RunConfig, rr *RunResults)
 		TokensReasoning: result.TokensReasoning,
 		TimeMS:          elapsed.Milliseconds(),
 		RawOutput:       result.Text,
+		Reasoning:       result.Reasoning,
 		Findings:        findings,
 		Primers:         primerIDs,
 		InputPrice:      rc.Config.ModelProfiles[rc.ActiveProfile][pr.Persona.ModelCategory].InputPricePerMillion,

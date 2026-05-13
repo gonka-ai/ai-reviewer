@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -50,6 +55,7 @@ type ModelClient interface {
 
 type ModelResult struct {
 	Text            string
+	Reasoning       string
 	TokensIn        int
 	TokensOut       int
 	TokensReasoning int
@@ -65,6 +71,11 @@ const (
 	Balanced     ModelCategory = "balanced"
 	BestCode     ModelCategory = "best_code"
 	FrontierBest ModelCategory = "frontier_best"
+)
+
+const (
+	kimiK26GonkaModel    = "moonshotai/Kimi-K2.6"
+	kimiK26MoonshotModel = "kimi-k2.6"
 )
 
 // OpenAI Client
@@ -131,6 +142,7 @@ func (c *OpenAIClient) generate(ctx context.Context, prompt string, maxTokens in
 
 	return ModelResult{
 		Text:            resp.Choices[0].Message.Content,
+		Reasoning:       "",
 		TokensIn:        tokensIn,
 		TokensOut:       tokensOut,
 		TokensReasoning: tokensReasoning,
@@ -243,6 +255,7 @@ func (c *AnthropicClient) generate(ctx context.Context, prompt string, maxTokens
 
 	return ModelResult{
 		Text:            text,
+		Reasoning:       "",
 		TokensIn:        int(inputTokens),
 		TokensOut:       int(outputTokens),
 		TokensReasoning: tokensReasoning,
@@ -330,6 +343,7 @@ func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens in
 
 	if len(resp.Candidates[0].Content.Parts) == 0 {
 		return ModelResult{
+			Reasoning:       "",
 			TokensIn:        tokensIn,
 			TokensOut:       tokensOut,
 			TokensReasoning: tokensReasoning,
@@ -348,6 +362,7 @@ func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens in
 
 	return ModelResult{
 		Text:            text,
+		Reasoning:       "",
 		TokensIn:        tokensIn,
 		TokensOut:       tokensOut,
 		TokensReasoning: tokensReasoning,
@@ -357,27 +372,215 @@ func (c *GeminiClient) generate(ctx context.Context, prompt string, maxTokens in
 	}, nil
 }
 
-func GetModelClient(ctx context.Context, provider, model, reasoningLevel string) (ModelClient, error) {
-	switch provider {
+// Kimi Client
+type KimiClient struct {
+	httpClient          *http.Client
+	baseURL             string
+	model               string
+	thinkingEnabled     bool
+	authorizationKey    string
+	useMoonshotThinking bool
+}
+
+type kimiChatCompletionResponse struct {
+	Choices []kimiChatCompletionChoice `json:"choices"`
+	Usage   openai.Usage               `json:"usage"`
+}
+
+type kimiChatCompletionChoice struct {
+	Message      kimiChatCompletionMessage `json:"message"`
+	FinishReason openai.FinishReason       `json:"finish_reason"`
+}
+
+type kimiChatCompletionMessage struct {
+	Content          string `json:"content,omitempty"`
+	Reasoning        string `json:"reasoning,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+func NewKimiClient(baseURL, apiKey, model string, stripAuthHeader bool, thinkingEnabled bool) *KimiClient {
+	httpClient := &http.Client{}
+	if stripAuthHeader {
+		httpClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			req = req.Clone(req.Context())
+			req.Header.Del("Authorization")
+			return http.DefaultTransport.RoundTrip(req)
+		})
+	}
+	return &KimiClient{
+		httpClient:          httpClient,
+		baseURL:             strings.TrimRight(baseURL, "/"),
+		model:               model,
+		thinkingEnabled:     thinkingEnabled,
+		authorizationKey:    apiKey,
+		useMoonshotThinking: model == kimiK26MoonshotModel,
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func (c *KimiClient) Generate(ctx context.Context, prompt string, maxTokens int) (ModelResult, error) {
+	return c.generate(ctx, prompt, maxTokens)
+}
+
+func (c *KimiClient) GenerateJSON(ctx context.Context, prompt string, maxTokens int) (ModelResult, error) {
+	jsonPrompt := prompt + "\n\nReturn exactly one valid JSON object or array. Do not include markdown fences or any explanation before or after the JSON."
+	return c.generate(ctx, jsonPrompt, maxTokens)
+}
+
+func (c *KimiClient) generate(ctx context.Context, prompt string, maxTokens int) (ModelResult, error) {
+	req := openai.ChatCompletionRequest{
+		Model: c.model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt,
+			},
+		},
+		Stream: false,
+		ChatTemplateKwargs: map[string]any{
+			"thinking": c.thinkingEnabled,
+		},
+	}
+	if maxTokens > 0 {
+		req.MaxCompletionTokens = maxTokens
+	} else {
+		req.MaxCompletionTokens = 32_000
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return ModelResult{}, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ModelResult{}, err
+	}
+	payload["stream"] = false
+	if c.useMoonshotThinking {
+		delete(payload, "chat_template_kwargs")
+		thinkingType := "disabled"
+		if c.thinkingEnabled {
+			thinkingType = "enabled"
+		}
+		payload["thinking"] = map[string]any{
+			"type": thinkingType,
+		}
+	}
+	body, err = json.Marshal(payload)
+	if err != nil {
+		return ModelResult{}, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return ModelResult{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.authorizationKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.authorizationKey)
+	}
+
+	httpResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return ModelResult{}, err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(httpResp.Body)
+		return ModelResult{}, fmt.Errorf("kimi request failed: %s: %s", httpResp.Status, strings.TrimSpace(string(errBody)))
+	}
+
+	var resp kimiChatCompletionResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return ModelResult{}, fmt.Errorf("error unmarshaling kimi response: %w", err)
+	}
+	if len(resp.Choices) == 0 {
+		return ModelResult{}, fmt.Errorf("empty response from Kimi")
+	}
+
+	finishReason := string(resp.Choices[0].FinishReason)
+	reasoning := resp.Choices[0].Message.Reasoning
+	if reasoning == "" {
+		reasoning = resp.Choices[0].Message.ReasoningContent
+	}
+
+	tokensReasoning := 0
+	if resp.Usage.CompletionTokensDetails != nil {
+		tokensReasoning = resp.Usage.CompletionTokensDetails.ReasoningTokens
+	}
+
+	log.Printf("Kimi finished. Finish Reason: %s", finishReason)
+	return ModelResult{
+		Text:            resp.Choices[0].Message.Content,
+		Reasoning:       reasoning,
+		TokensIn:        resp.Usage.PromptTokens,
+		TokensOut:       resp.Usage.CompletionTokens,
+		TokensReasoning: tokensReasoning,
+		Provider:        "kimi",
+		Model:           c.model,
+		FinishReason:    finishReason,
+	}, nil
+}
+
+func GetModelClient(ctx context.Context, cfg ModelConfig) (ModelClient, error) {
+	switch cfg.Provider {
 	case "openai":
 		apiKey := getEnv("OPENAI_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY not set")
 		}
-		return NewOpenAIClient(apiKey, model, reasoningLevel), nil
+		return NewOpenAIClient(apiKey, cfg.Model, cfg.ReasoningLevel), nil
 	case "anthropic":
 		apiKey := getEnv("ANTHROPIC_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
 		}
-		return NewAnthropicClient(apiKey, model, reasoningLevel), nil
+		return NewAnthropicClient(apiKey, cfg.Model, cfg.ReasoningLevel), nil
 	case "gemini":
 		apiKey := getEnv("GEMINI_API_KEY")
 		if apiKey == "" {
 			return nil, fmt.Errorf("GEMINI_API_KEY not set")
 		}
-		return NewGeminiClient(ctx, apiKey, model, reasoningLevel)
+		return NewGeminiClient(ctx, apiKey, cfg.Model, cfg.ReasoningLevel)
+	case "kimi":
+		if cfg.BaseURLEnv == "" {
+			return nil, fmt.Errorf("kimi model %s missing base_url_env", cfg.Model)
+		}
+		baseURL := getEnv(cfg.BaseURLEnv)
+		if baseURL == "" {
+			return nil, fmt.Errorf("%s not set", cfg.BaseURLEnv)
+		}
+		if cfg.Model != kimiK26GonkaModel && cfg.Model != kimiK26MoonshotModel {
+			return nil, fmt.Errorf("unsupported kimi model: %s", cfg.Model)
+		}
+		if cfg.ReasoningLevel != "" && cfg.ReasoningLevel != "none" {
+			log.Printf("provider kimi enabling thinking for reasoning_level=%q", cfg.ReasoningLevel)
+		}
+
+		apiKey := ""
+		stripAuthHeader := true
+		if cfg.APIKeyEnv != "" {
+			apiKey = getEnv(cfg.APIKeyEnv)
+			if apiKey == "" {
+				return nil, fmt.Errorf("%s not set", cfg.APIKeyEnv)
+			}
+			stripAuthHeader = false
+		} else if cfg.Model == kimiK26GonkaModel {
+			apiKey = getEnv("GONKA_API_TOKEN")
+			if apiKey != "" {
+				stripAuthHeader = false
+			}
+		}
+
+		thinkingEnabled := cfg.ReasoningLevel != "" && cfg.ReasoningLevel != "none"
+		return NewKimiClient(baseURL, apiKey, cfg.Model, stripAuthHeader, thinkingEnabled), nil
 	default:
-		return nil, fmt.Errorf("unknown provider: %s", provider)
+		return nil, fmt.Errorf("unknown provider: %s", cfg.Provider)
 	}
 }
